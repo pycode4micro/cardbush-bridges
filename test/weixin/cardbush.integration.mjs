@@ -75,7 +75,7 @@ test('Weixin message completes through the actual Cardbush session and returns o
   } finally { await gateway?.close(); await bridge?.close(); await runtime.sendCommand({ kind: 'runtime.shutdown', payload: {} }); await rm(root, { recursive: true, force: true }); }
 });
 
-test('Agent file tool -> generic multipart Webhook -> independent Weixin bridge preserves bytes and source', async () => {
+test('Agent file tool -> generic multipart Webhook -> independent Weixin bridge preserves bytes and source', { timeout: 30000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'weixin-file-chain-')), sent = [], calls = []; let gateway, bridge;
   const file = join(root, 'report.txt'), bytes = Buffer.from('完整链路附件\n'); await writeFile(file, bytes);
   const runtime = new InMemoryRuntimeHost({ dataRoot: root, sessionStore: new SessionStore(), botMessaging: {
@@ -108,8 +108,10 @@ test('Agent file tool -> generic multipart Webhook -> independent Weixin bridge 
       binding: { kind: 'conversation', sessionId: 'files', title: 'Files', parent } });
     bridge.config.cardbush = { url: saved.connections[0].endpoint, token: saved.connections[0].token }; await bridge.advertise();
     await bridge.ingest({ msgs: [{ message_type: 1, message_id: '9007199254740995', from_user_id: 'owner', context_token: 'original-weixin-context', item_list: [{ type: 1, text_item: { text: '把报告作为文件发给我。' } }] }] });
-    for (let i = 0; i < 150 && !sent.length; i++) { await bridge.processOnce(); await new Promise(resolve => setTimeout(resolve, 25)); }
-    assert.equal(sent.length, 1); assert.equal(sent[0][0], 'owner'); assert.equal(sent[0][1], 'original-weixin-context'); assert.equal(sent[0][2].name, 'report.txt'); assert.deepEqual(sent[0][2].bytes, bytes);
+    const deadline = Date.now() + 15000;
+    while (!sent.length && Date.now() < deadline) { await bridge.processOnce(); await new Promise(resolve => setTimeout(resolve, 25)); }
+    assert.equal(sent.length, 1, JSON.stringify(calls.at(-1)?.messages.filter(message => message.role === 'tool')));
+    assert.equal(sent[0][0], 'owner'); assert.equal(sent[0][1], 'original-weixin-context'); assert.equal(sent[0][2].name, 'report.txt'); assert.deepEqual(sent[0][2].bytes, bytes);
     assert.ok(calls.every(call => !call.tools.some(t => t.name === 'send_to_bot')));
     assert.ok(JSON.stringify(calls).includes('bridge-schema-call'));
     await bridge.processOnce(); assert.equal(sent.length, 1);

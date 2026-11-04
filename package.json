@@ -1,6 +1,6 @@
 {
   "name": "cardbush-bridges",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Independent multi-platform Bot bridges for the generic Cardbush Webhook protocol",
@@ -17,7 +17,7 @@
     "doctor": "node bin/cardbush-bridge.mjs doctor",
     "status": "node bin/cardbush-bridge.mjs status",
     "test": "node --test test/*.test.mjs test/weixin/*.test.mjs test/feishu/*.test.mjs",
-    "test:cardbush": "node --test test/weixin/cardbush.integration.mjs test/feishu/cardbush.integration.mjs"
+    "test:cardbush": "node --test test/weixin/cardbush.integration.mjs test/weixin/media.integration.mjs test/feishu/cardbush.integration.mjs"
   },
   "dependencies": { "@larksuiteoapi/node-sdk": "1.76.0", "qrcode": "1.5.4" }
 }

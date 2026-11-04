@@ -54,7 +54,14 @@ cardbush-bridge start --all
 
 ## 桥自带插件
 
-更新后重启 Cardbush 和本桥，已保存的连接会自动恢复。连接时微信、飞书各注册 `send_text`、`send_file`、`delivery_status` 到当前会话的插件搜索；用户只需在 Bot 说“把报告作为文件发给我”。Agent 按来信来源发现并调用对应平台工具，Assistant 可以委派子任务执行。
+使用支持桥插件的 Cardbush，更新后重启本桥，已保存的连接会自动恢复。桥在连接时向当前会话的插件搜索注册自己的工具：
+
+| 平台 | Agent 工具 |
+| --- | --- |
+| 微信 | `send_text`、`send_file`、`send_image`、`send_video`、`list_attachments`、`download_attachment`、`delivery_status` |
+| 飞书 | `send_text`、`send_file`、`delivery_status` |
+
+用户可以在微信发来图片、MP4 视频或文件，再说“看一下附件”或“把刚才的文件发回来”。Agent 按来信来源搜索微信桥插件、下载并使用已有工具读取，必要时调用对应发送工具；图片支持原生图片消息、视频支持原生 MP4 消息。Assistant 也可以委派子任务执行。登录、平台配置、输入状态和启停由桥自己管理。微信入站附件的 `localPath` 读取要求桥和 Cardbush 在同一台机器，详见 [微信接入](docs/weixin.md)。
 
 常驻 `send_to_bot` 已移除。桥不在线、连接撤销或租约过期时，工具不可执行；正常退出主动撤销，异常退出最多 45 秒失效。每 15 秒刷新声明。卡片等未来平台特有能力只需在对应适配器的 `plugins.mjs` 增加，不必修改 Cardbush。旧版 Cardbush 不支持插件声明时会提示 `cardbush_plugins_upgrade_required`，请同时升级。
 
@@ -66,7 +73,7 @@ cardbush-bridge start --all
 
 ```text
 .private/
-  weixin/    配置、登录、队列、待发文件
+  weixin/    配置、登录、队列、待发文件、来信附件缓存
   feishu/    配置、配对用户、队列、待发文件
 ```
 
@@ -96,4 +103,4 @@ npm test
 npm run test:cardbush
 ```
 
-集成测试依赖相邻的已构建 Cardbush 源码，或通过 `CARDBUSH_SOURCE_DIR` 指定；运行服务不需要源码。测试使用临时目录、随机端口及模拟平台接口，覆盖发现顺序、输入提示、数据导入、会话来源、真实 Runtime 文件工具、文件字节和持久化重试。真实账号收件不由模拟测试代替。
+集成测试依赖相邻的已构建 Cardbush 源码，或通过 `CARDBUSH_SOURCE_DIR` 指定；运行服务不需要源码。测试使用临时目录、随机端口及模拟平台接口，覆盖发现顺序、输入提示、数据导入、会话来源、真实 Runtime 插件搜索与文件/图像工具、媒体收发字节和持久化重试。图片、视频、文件分别覆盖普通会话和 Assistant 委派链路。真实账号收件不由模拟测试代替。

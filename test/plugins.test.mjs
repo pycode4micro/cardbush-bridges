@@ -20,7 +20,7 @@ for (const platform of ['weixin', 'feishu']) test(`${platform} plugin tools vali
   }
   const record = bridge.state.records[0], bytes = Buffer.from('plugin bytes\n');
   const event = { ...outbound(platform === 'feishu' ? record : { id: record.id, senderId: record.sender, conversationId: 'bot:owner' }, bytes),
-    type: 'tool.call', pluginId: platform, pluginVersion: '1.0.0', tool: 'send_file', arguments: { file: { part: 'file_0' }, caption: 'Requested file' } };
+    type: 'tool.call', pluginId: platform, pluginVersion: bridge.plugins[0].manifest.version, tool: 'send_file', arguments: { file: { part: 'file_0' }, caption: 'Requested file' } };
   const port = await bridge.listen(0);
   const request = async value => {
     const form = new FormData(); form.set('payload', JSON.stringify(value)); form.set('file_0', new Blob([bytes]), 'report.txt');
