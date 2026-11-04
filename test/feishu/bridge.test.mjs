@@ -50,7 +50,7 @@ test('capabilities register before forwarding, concurrent workers deduplicate an
     calls.push(url);
     if (url.endsWith('/capabilities')) {
       assert.deepEqual(JSON.parse(options.body).capabilities, { text: true, files: true, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_TOTAL_BYTES });
-      return Response.json({ protocol: 'cardbush.webhook.v1', status: 'connected' });
+      return Response.json({ protocol: 'cardbush.webhook.v1', status: 'connected', features: ['bridge_plugins'] });
     }
     return Response.json(receipt);
   } } });

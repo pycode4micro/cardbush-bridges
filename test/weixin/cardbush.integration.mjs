@@ -10,6 +10,7 @@ import { once } from 'node:events';
 import { Bridge } from '../../src/adapters/weixin/bridge.mjs';
 import { connectLocalService } from '../../src/shared/local-connection.mjs';
 const source = resolve(process.env.CARDBUSH_SOURCE_DIR || '../cardbush');
+const { bridgeModelStep } = await import(pathToFileURL(join(source, 'scripts/helpers/bridge-plugin-fixture.mjs')));
 const { ContextWebhookHost } = await import(pathToFileURL(join(source, 'dist-electron/contextWebhookHost.mjs')));
 const { InMemoryRuntimeHost, SessionStore } = await import(pathToFileURL(join(source, 'packages/bush-runtime/dist/index.js')));
 
@@ -77,21 +78,20 @@ test('Weixin message completes through the actual Cardbush session and returns o
 test('Agent file tool -> generic multipart Webhook -> independent Weixin bridge preserves bytes and source', async () => {
   const root = await mkdtemp(join(tmpdir(), 'weixin-file-chain-')), sent = [], calls = []; let gateway, bridge;
   const file = join(root, 'report.txt'), bytes = Buffer.from('完整链路附件\n'); await writeFile(file, bytes);
-  const runtime = new InMemoryRuntimeHost({ sessionStore: new SessionStore(), botMessaging: {
+  const runtime = new InMemoryRuntimeHost({ dataRoot: root, sessionStore: new SessionStore(), botMessaging: {
     context: (sessionId, sourceRef, signal) => gateway.botRequest({ action: 'context', sessionId, sourceRef }, signal),
-    send: (sessionId, input, signal, files) => gateway.botRequest({ action: 'send', sessionId, input, files }, signal),
+    catalog: (sessionId, signal) => gateway.botRequest({ action: 'catalog', sessionId }, signal),
+    call: (sessionId, input, signal, files) => gateway.botRequest({ action: 'call', sessionId, input, files }, signal),
   }, provider: { async *stream(input) {
     calls.push(input);
     const base = { protocol: 'bush.model_event.v1', requestId: input.requestId, createdAt: new Date().toISOString() };
     yield { ...base, sequence: 0, kind: 'response_started' };
-    const first = !input.messages.some(m => m.role === 'tool' && m.toolCallId === 'file-tool');
-    if (first) {
-      const state = JSON.parse(input.messages.filter(m => m.name === 'bot_context').at(-1).content.split('\n').at(-1));
-      assert.equal(state.source.botName, 'Weixin'); assert.equal(state.source.senderId, 'owner'); assert.equal(state.source.available, true);
-      yield { ...base, sequence: 1, kind: 'tool_call_delta', index: 0, toolCallId: 'file-tool', nameDelta: 'send_to_bot',
-        argumentsDelta: JSON.stringify({ source_ref: state.source.sourceRef, request_id: 'file-report', files: [file] }) };
-    } else yield { ...base, sequence: 1, kind: 'text_delta', delta: '已交给 Bot 发送。' };
-    yield { ...base, sequence: 2, kind: 'response_completed', finishReason: first ? 'tool_calls' : 'stop' };
+    const state = JSON.parse(input.messages.filter(m => m.name === 'bot_context').at(-1).content.split('\n').at(-1));
+    assert.equal(state.source.botName, 'Weixin'); assert.equal(state.source.senderId, 'owner'); assert.equal(state.source.available, true);
+    const call = bridgeModelStep(input.messages, file);
+    if (call) yield { ...base, sequence: 1, kind: 'tool_call_delta', index: 0, toolCallId: call.id, nameDelta: call.name, argumentsDelta: JSON.stringify(call.arguments) };
+    else yield { ...base, sequence: 1, kind: 'text_delta', delta: '已交给 Bot 发送。' };
+    yield { ...base, sequence: 2, kind: 'response_completed', finishReason: call ? 'tool_calls' : 'stop' };
   } } });
   const local = { command: (kind, payload) => runtime.sendCommand({ kind, payload }) };
   try {
@@ -100,7 +100,7 @@ test('Agent file tool -> generic multipart Webhook -> independent Weixin bridge 
     bridge = await new Bridge(root, { cardbush: { url: 'http://127.0.0.1:4791/api/webhooks/v1/test/messages', token: 'a'.repeat(64) }, callbackToken: 'b'.repeat(64), port: 4792 },
       { id: 'bot', userId: 'owner' }, { send: async () => {}, sendFile: async (...args) => { sent.push(args); } }, { log() {} }).load();
     const port = await bridge.listen(0);
-    const parent = { protocol: 'bush.session_turn_request.v1', requestId: 'bind', turnId: 'bind', sessionId: 'files', model: 'fixture', tools: [],
+    const parent = { protocol: 'bush.session_turn_request.v1', requestId: 'bind', turnId: 'bind', sessionId: 'files', model: 'fixture', tools: await local.command('runtime.get_tool_catalog', {}),
       prefixMessages: [], inputMessages: [{ messageId: 'bind', message: { role: 'user', content: 'Context' } }], metadata: {}, permissionMode: 'all_free' };
     const saved = await gateway.command({ action: 'save', config: { name: 'Weixin', enabled: true, url: `http://127.0.0.1:${port}/reply`,
       headers: { Authorization: 'Bearer ' + bridge.config.callbackToken }, parameters: {}, body: { protocol: '{{protocol}}', type: '{{type}}', eventId: '{{eventId}}', sequence: '{{sequence}}', messageId: '{{messageId}}', senderId: '{{senderId}}', conversationId: '{{conversationId}}', status: '{{status}}', reply: '{{reply}}' },
@@ -110,7 +110,8 @@ test('Agent file tool -> generic multipart Webhook -> independent Weixin bridge 
     await bridge.ingest({ msgs: [{ message_type: 1, message_id: '9007199254740995', from_user_id: 'owner', context_token: 'original-weixin-context', item_list: [{ type: 1, text_item: { text: '把报告作为文件发给我。' } }] }] });
     for (let i = 0; i < 150 && !sent.length; i++) { await bridge.processOnce(); await new Promise(resolve => setTimeout(resolve, 25)); }
     assert.equal(sent.length, 1); assert.equal(sent[0][0], 'owner'); assert.equal(sent[0][1], 'original-weixin-context'); assert.equal(sent[0][2].name, 'report.txt'); assert.deepEqual(sent[0][2].bytes, bytes);
-    assert.ok(calls.some(call => call.tools.some(t => t.name === 'send_to_bot')));
+    assert.ok(calls.every(call => !call.tools.some(t => t.name === 'send_to_bot')));
+    assert.ok(JSON.stringify(calls).includes('bridge-schema-call'));
     await bridge.processOnce(); assert.equal(sent.length, 1);
   } finally { await gateway?.close(); await bridge?.close(); await local.command('runtime.shutdown', {}); await rm(root, { recursive: true, force: true }); }
 });

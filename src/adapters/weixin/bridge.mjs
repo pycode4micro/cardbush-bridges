@@ -7,6 +7,8 @@ import { readJson, writeJson } from '../../shared/storage.mjs';
 import { validateConfig } from './config.mjs';
 import { localServiceFetch } from '../../shared/local-http.mjs';
 import { readBotCallback, validateBotSend, digest, MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../../shared/bot-outbound.mjs';
+import { createPlugins } from './plugins.mjs';
+import { bridgeInstance, advertisePlugins, withdrawPlugins, invokePlugin } from '../../shared/plugins.mjs';
 export { validateConfig } from './config.mjs';
 
 export const hash = value => createHash('sha256').update(value).digest('hex');
@@ -19,6 +21,7 @@ export class Bridge {
   constructor(root, config, account, api, { fetcher = localServiceFetch, log = console.log } = {}) {
     this.root = root; this.config = validateConfig(config); this.account = account; this.api = api; this.fetch = fetcher; this.log = log;
     this.state = { version: 1, cursor: '', records: [], outbound: [] }; this.writes = Promise.resolve(); this.abort = new AbortController();
+    this.instanceId = bridgeInstance(); this.plugins = createPlugins(this);
   }
   async load() {
     this.state = await readJson(join(this.root, 'queue.json'), this.state);
@@ -67,6 +70,7 @@ export class Bridge {
   }
   async receive(event, files = []) {
     if (event.type === 'connection.test') return;
+    if (event.type === 'tool.call') return invokePlugin(this, event, files);
     if (event.type === 'message.send') return this.receiveSend(event, files);
     if (event.protocol !== 'cardbush.webhook.v1' || !Number.isSafeInteger(event.sequence) || event.sequence < 1
       || typeof event.reply !== 'string' || event.reply.length > 128000 || !['completed', 'failed', 'stopped', 'interrupted', 'accepted', 'running'].includes(event.status)) throw Error('invalid_receipt');
@@ -102,12 +106,7 @@ export class Bridge {
     return { protocol: 'cardbush.webhook.v1', type: 'message.accepted', eventId: event.eventId, status: 'accepted' };
   }
   async advertise() {
-    const response = await this.fetch(this.config.cardbush.url.replace(/\/messages$/, '/capabilities'), {
-      method: 'POST', redirect: 'error', signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(5000)]),
-      headers: { Authorization: 'Bearer ' + this.config.cardbush.token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ protocol: 'cardbush.webhook.v1', capabilities: { text: true, files: true, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_TOTAL_BYTES } }),
-    });
-    await response.body?.cancel(); if (!response.ok) throw Error('capability_registration_failed');
+    return advertisePlugins(this, { text: true, files: true, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_TOTAL_BYTES });
   }
   async sendOutbound() {
     for (const item of this.state.outbound.filter(item => !item.done)) {
@@ -177,7 +176,7 @@ export class Bridge {
     await this.listen(); this.log('Weixin bridge ready; callback listening on 127.0.0.1:' + this.config.port + '/reply');
     const advertise = () => this.advertise().catch(error => { if (!this.abort.signal.aborted) this.log('Cardbush capability registration: ' + safeError(error)); });
     await advertise();
-    const heartbeat = async () => { while (!this.abort.signal.aborted) { await delay(30000, null, { signal: this.abort.signal }); await advertise(); } };
+    const heartbeat = async () => { while (!this.abort.signal.aborted) { await delay(15000, null, { signal: this.abort.signal }); await advertise(); } };
     const work = async () => { while (!this.abort.signal.aborted) { await this.processOnce(); await delay(1000, null, { signal: this.abort.signal }); } };
     const poll = async () => { while (!this.abort.signal.aborted) {
       try { const update = await this.api.updates(this.state.cursor, this.abort.signal); await this.ingest(update); await delay(200, null, { signal: this.abort.signal }); }
@@ -185,6 +184,10 @@ export class Bridge {
     } };
     try { await Promise.all([work(), poll(), heartbeat()]); } finally { await this.close(); }
   }
-  async close() { this.abort.abort(); if (this.server) { this.server.closeAllConnections(); await new Promise(r => this.server.close(r)); this.server = undefined; } await this.writes; }
+  async close() {
+    if (this.closing) return this.closing;
+    return this.closing = (async () => { this.abort.abort(); await withdrawPlugins(this);
+      if (this.server) { this.server.closeAllConnections(); await new Promise(r => this.server.close(r)); this.server = undefined; } await this.writes; })();
+  }
 }
 export function safeError(error) { return /^[a-z0-9_]+$/i.test(error?.message ?? '') ? error.message : 'connection_failed'; }

@@ -15,6 +15,7 @@ import { connectLocalService } from '../../src/shared/local-connection.mjs';
 import { config, app, message } from './helpers.mjs';
 
 const source = resolve(process.env.CARDBUSH_SOURCE_DIR || '../cardbush');
+const { bridgeModelStep } = await import(pathToFileURL(join(source, 'scripts/helpers/bridge-plugin-fixture.mjs')));
 const { ContextWebhookHost } = await import(pathToFileURL(join(source, 'dist-electron/contextWebhookHost.mjs')));
 const { InMemoryRuntimeHost, SessionStore } = await import(pathToFileURL(join(source, 'packages/bush-runtime/dist/index.js')));
 const { assistantProfileSchema } = await import(pathToFileURL(join(source, 'packages/bush-protocol/dist/index.js')));
@@ -47,7 +48,7 @@ for (const order of ['desktop-first', 'bridge-first']) test(`automatic generic p
   } finally { abort.abort(); await connecting?.catch(() => {}); await gateway.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-for (const kind of ['conversation', 'assistant']) test(`${kind}: Feishu message -> actual Runtime/send_to_bot -> multipart -> Feishu upload/send preserves source, context and bytes`, { timeout: 20000 }, async () => {
+for (const kind of ['conversation', 'assistant']) test(`${kind}: Feishu message -> actual Runtime/plugin discovery -> multipart -> Feishu upload/send preserves source, context and bytes`, { timeout: 20000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'feishu-chain-')), sent = [], calls = [], uploads = []; let gateway, bridge;
   const file = join(root, 'report.txt'), bytes = Buffer.from('真实本机 HTTP 链路测试\n二进制不经过模型\n'); await writeFile(file, bytes);
   const api = new FeishuApi(app, async (url, options) => {
@@ -62,25 +63,28 @@ for (const kind of ['conversation', 'assistant']) test(`${kind}: Feishu message 
   });
   const runtime = new InMemoryRuntimeHost({ dataRoot: root, sessionStore: new SessionStore(), botMessaging: {
     context: (sessionId, sourceRef, signal) => gateway.botRequest({ action: 'context', sessionId, sourceRef }, signal),
-    send: (sessionId, input, signal, files) => gateway.botRequest({ action: 'send', sessionId, input, files }, signal),
+    catalog: (sessionId, signal) => gateway.botRequest({ action: 'catalog', sessionId }, signal),
+    call: (sessionId, input, signal, files) => gateway.botRequest({ action: 'call', sessionId, input, files }, signal),
   }, provider: { async *stream(input) {
     calls.push(input); const base = { protocol: 'bush.model_event.v1', requestId: input.requestId, createdAt: new Date().toISOString() };
     yield { ...base, sequence: 0, kind: 'response_started' };
     const source = input.messages.filter(m => m.name === 'bot_context').at(-1);
-    const first = source && !input.messages.some(m => m.role === 'tool' && m.toolCallId === 'file-tool');
-    if (first) {
-      const state = JSON.parse(source.content.split('\n').at(-1));
-      assert.equal(state.source.botName, '飞书服务'); assert.equal(state.source.senderId, 'ou_owner'); assert.equal(state.source.available, true);
-      assert.equal(state.source.conversationId, 'oc_origin');
-      assert.match(JSON.stringify(input.messages), /Remember olive/);
-      yield { ...base, sequence: 1, kind: 'tool_call_delta', index: 0, toolCallId: 'file-tool', nameDelta: 'send_to_bot',
-        argumentsDelta: JSON.stringify({ source_ref: state.source.sourceRef, request_id: 'file-report', files: [file] }) };
-    } else yield { ...base, sequence: 1, kind: 'text_delta', delta: source ? '报告已交给飞书服务发送。' : 'I remember olive.' };
-    yield { ...base, sequence: 2, kind: 'response_completed', finishReason: first ? 'tool_calls' : 'stop' };
+    const state = source && JSON.parse(source.content.split('\n').at(-1));
+    if (state?.source) {
+      assert.equal(state.source.botName, '飞书服务'); assert.equal(state.source.senderId, 'ou_owner');
+      assert.equal(state.source.conversationId, 'oc_origin'); assert.match(JSON.stringify(input.messages), /Remember olive/);
+    }
+    const call = !state?.source ? undefined : kind === 'assistant' && input.sessionId === 'personal-assistant' && input.metadata.agentRole !== 'child'
+      ? input.messages.some(m => m.role === 'tool' && m.toolCallId === 'delegate-file') ? undefined
+        : { id: 'delegate-file', name: 'subagent', arguments: { prompt: 'Send the report using the current source bridge plugin. Remember olive.' } }
+      : bridgeModelStep(input.messages, file);
+    if (call) yield { ...base, sequence: 1, kind: 'tool_call_delta', index: 0, toolCallId: call.id, nameDelta: call.name, argumentsDelta: JSON.stringify(call.arguments) };
+    else yield { ...base, sequence: 1, kind: 'text_delta', delta: source ? '报告已交给飞书服务发送。' : 'I remember olive.' };
+    yield { ...base, sequence: 2, kind: 'response_completed', finishReason: call ? 'tool_calls' : 'stop' };
   } } });
   const local = { command: (type, payload) => runtime.sendCommand({ kind: type, payload }) };
   try {
-    const sessionId = kind === 'assistant' ? 'personal-assistant' : 'files', request = parent(sessionId);
+    const sessionId = kind === 'assistant' ? 'personal-assistant' : 'files', request = { ...parent(sessionId), tools: await local.command('runtime.get_tool_catalog', {}), metadata: { mcpCatalogUpdates: 'additions' } };
     if (kind === 'conversation') await runtime.runSessionTurn(request);
     else {
       await local.command('runtime.create_session', { sessionId });
@@ -104,7 +108,8 @@ for (const kind of ['conversation', 'assistant']) test(`${kind}: Feishu message 
     assert.equal(uploads.length, 1); assert.deepEqual(uploads[0], bytes);
     assert.equal(sent.filter(s => s.msg_type === 'file').length, 1); assert.equal(sent.filter(s => s.msg_type === 'text').length, 1);
     assert.ok(sent.every(s => s.receive_id === 'oc_origin')); assert.deepEqual(JSON.parse(sent.find(s => s.msg_type === 'file').content), { file_key: 'file_uploaded' });
-    assert.ok(calls.some(call => call.tools.some(t => t.name === 'send_to_bot')));
+    assert.ok(calls.every(call => !call.tools.some(t => t.name === 'send_to_bot')));
+    assert.ok(JSON.stringify(calls).includes('bridge-schema-call'));
     await dispatcher.invoke(event, { needCheck: false }); await bridge.processOnce(); assert.equal(sent.length, 2);
   } finally { await gateway?.close(); await bridge?.close(); await local.command('runtime.shutdown', {}); await rm(root, { recursive: true, force: true }); }
 });

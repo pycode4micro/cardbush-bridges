@@ -9,6 +9,8 @@ import { localServiceFetch } from '../../shared/local-http.mjs';
 import { readBotCallback, validateBotSend, digest } from '../../shared/bot-outbound.mjs';
 import { normalizeMessage } from './events.mjs';
 import { MAX_FILE_BYTES, MAX_TOTAL_BYTES } from './feishu.mjs';
+import { createPlugins } from './plugins.mjs';
+import { bridgeInstance, advertisePlugins, withdrawPlugins, invokePlugin } from '../../shared/plugins.mjs';
 
 export const hash = value => createHash('sha256').update(value).digest('hex');
 export const sendId = value => hash(value).slice(0, 32);
@@ -23,6 +25,7 @@ export class Bridge {
     this.root = root; this.config = validateConfig(config); this.api = api; this.fetch = fetcher; this.log = log; this.botOpenId = botOpenId; this.now = now;
     this.state = { version: 1, appId: config.feishu.appId, records: [], outbound: [] };
     this.writes = Promise.resolve(); this.abort = new AbortController(); this.ready = false;
+    this.instanceId = bridgeInstance(); this.plugins = createPlugins(this);
   }
   async load() {
     this.state = await readJson(join(this.root, 'queue.json'), this.state);
@@ -73,6 +76,7 @@ export class Bridge {
   async receive(event, files = []) {
     if (event.protocol !== 'cardbush.webhook.v1') throw Error('invalid_protocol');
     if (event.type === 'connection.test') return;
+    if (event.type === 'tool.call') return invokePlugin(this, event, files);
     if (event.type === 'message.send') return this.receiveSend(event, files);
     if (!['message.updated', 'message.completed'].includes(event.type) || !Number.isSafeInteger(event.sequence) || event.sequence < 1
       || typeof event.reply !== 'string' || event.reply.length > 128000 || !['completed', 'failed', 'stopped', 'interrupted', 'accepted', 'running'].includes(event.status)) throw Error('invalid_receipt');
@@ -107,15 +111,7 @@ export class Bridge {
     return { protocol: 'cardbush.webhook.v1', eventId: event.eventId, status: 'accepted' };
   }
   async advertise() {
-    this.ready = false;
-    const response = await this.fetch(this.config.cardbush.url.replace(/\/messages$/, '/capabilities'), {
-      method: 'POST', redirect: 'error', signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(5000)]),
-      headers: { Authorization: 'Bearer ' + this.config.cardbush.token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ protocol: 'cardbush.webhook.v1', capabilities: { text: true, files: true, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_TOTAL_BYTES } }),
-    });
-    const body = await response.json();
-    if (!response.ok || body.protocol !== 'cardbush.webhook.v1' || body.status !== 'connected') throw Error('capability_registration_failed');
-    this.ready = true;
+    return advertisePlugins(this, { text: true, files: true, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_TOTAL_BYTES });
   }
   async sendOutbound() {
     for (const item of this.state.outbound.filter(item => !item.done)) {
@@ -192,7 +188,7 @@ export class Bridge {
   async run() {
     const heartbeat = async () => { while (!this.abort.signal.aborted) {
       try { await this.advertise(); } catch (error) { if (!this.abort.signal.aborted) this.log('等待 Cardbush 服务：' + safeError(error)); }
-      await delay(this.ready ? 30000 : 5000, null, { signal: this.abort.signal });
+      await delay(this.ready ? 15000 : 5000, null, { signal: this.abort.signal });
     } };
     const work = async () => { while (!this.abort.signal.aborted) { await this.processOnce(); await delay(1000, null, { signal: this.abort.signal }); } };
     try { await Promise.all([heartbeat(), work()]); }
@@ -201,7 +197,7 @@ export class Bridge {
   }
   async close() {
     if (this.closing) return this.closing;
-    return this.closing = (async () => { this.abort.abort(); if (this.server) { this.server.closeAllConnections(); await new Promise(r => this.server.close(r)); }
+    return this.closing = (async () => { this.abort.abort(); await withdrawPlugins(this); if (this.server) { this.server.closeAllConnections(); await new Promise(r => this.server.close(r)); }
       await this.processing?.catch(() => {}); await this.writes; })();
   }
 }

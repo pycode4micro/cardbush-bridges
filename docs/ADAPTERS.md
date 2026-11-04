@@ -19,9 +19,19 @@
 平台只负责以下转换：
 
 1. 将平台来信转换为 `messageId`、`senderId`、`conversationId`、`text`，先持久化，再向 Cardbush 提交。消息 ID 必须稳定并支持重放去重。
-2. 声明自己的文字、文件和大小限制，定期刷新 `/capabilities`。
-3. 使用共享 `bot-outbound.mjs` 解析通用回调并校验 SHA-256；进一步施加平台文件限制。
+2. 在适配器 `plugins.mjs` 提供 `{ manifest, handlers }` 集合；通过共享 `advertisePlugins` 每 15 秒声明插件、文件和大小限制，退出时 `withdrawPlugins` 撤销。
+3. 使用共享 `bot-outbound.mjs` 解析通用回调并校验 SHA-256；将 `tool.call` 交给 `invokePlugin` 按插件 ID、版本与工具名分发。处理器验证参数及平台限制。
 4. 从已持久化的原始来信决定收件人。外部回调不能指定任意陌生收件人。
 5. 将文件和发送进度持久化，再返回 `accepted`；它表示桥已接收，不表示平台已送达。平台回执、重试标识及上传状态仍由适配器保存。
 
 通用共享层不得导入某个平台 SDK、判断具体平台名称或读取其账号。新适配器可以参考两个现有队列，但不要把平台上传协议塞入共享回调解析器。应增加独立协议测试，并通过真实 Cardbush Runtime 的对话、来源与文件工具集成测试。
+
+## 插件集合
+
+`manifest` 包含 `id`、`name`、`version`、`description`、`tools`；工具包含 `name`、`description`、JSON `inputSchema`，可声明 `fileArguments` 与 `readOnly`。`handlers[toolName](event, files)` 返回 JSON 结果。微信、飞书各有自己的集合，通用层不固定平台功能列表。
+
+模型文件参数使用本机路径，但桥收到的是 `{part: "file_0"}` 和经过校验的二进制数组；不得将参数当成本机路径读取。`source_ref`、`request_id` 属于宿主保留参数，不应声明到平台 schema。回调包含可信路由字段，处理器仍必须对照原始来信校验，不允许任意收件人。
+
+`send_text` / `send_file` 可复用 `messagingHandlers`，其他能力直接定义自己的处理器。有副作用的处理器必须按 `eventId` 持久化去重并保存重试进度。只读工具也必须验证来源。`accepted` 与平台送达状态分开；返回值通过 `result` 交给 Agent。
+
+详细线协议见相邻 Cardbush 的 `docs/WEBHOOK_BOT_PROTOCOL.md`。运行服务不需要引用 Cardbush 源码或安装平台插件到核心仓库。

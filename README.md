@@ -1,6 +1,6 @@
 # Cardbush Bridges
 
-独立的多平台 Bot 桥项目。当前支持微信和飞书，统一使用 `cardbush.webhook.v1` 接入 Cardbush App 或 CLI，支持对话和 Agent 调用 `send_to_bot` 发送文件。平台代码、账号、SDK 和队列都在本项目中，Cardbush 核心无需增加平台适配，也不依赖 OpenClaw。
+独立的多平台 Bot 桥项目。当前支持微信和飞书，统一使用 `cardbush.webhook.v1` 接入 Cardbush App 或 CLI，支持对话，并自带供 Agent 搜索调用的平台插件集合。平台代码、账号、SDK 和队列都在本项目中，Cardbush 核心无需增加平台适配，也不依赖 OpenClaw。
 
 ## 启动
 
@@ -51,6 +51,14 @@ cardbush-bridge start --all
 `cardbush-bridges`、`npm start -- feishu`、`npm start -- all` 等旧入口仍然兼容。npm 脚本需要独立的 `--` 来转发参数；日常使用直接调用 `cardbush-bridge` 即可。
 
 默认 Cardbush 入口是 `127.0.0.1:4791`；微信回复端口为 `4792`，飞书为 `4793`。App 与 CLI 使用同一协议，但各自保存上下文，默认端口同时只能由一个宿主监听。更换 Cardbush 端口时设置 `CARDBUSH_WEBHOOK_URL`，然后重新执行 `connect`。
+
+## 桥自带插件
+
+更新后重启 Cardbush 和本桥，已保存的连接会自动恢复。连接时微信、飞书各注册 `send_text`、`send_file`、`delivery_status` 到当前会话的插件搜索；用户只需在 Bot 说“把报告作为文件发给我”。Agent 按来信来源发现并调用对应平台工具，Assistant 可以委派子任务执行。
+
+常驻 `send_to_bot` 已移除。桥不在线、连接撤销或租约过期时，工具不可执行；正常退出主动撤销，异常退出最多 45 秒失效。每 15 秒刷新声明。卡片等未来平台特有能力只需在对应适配器的 `plugins.mjs` 增加，不必修改 Cardbush。旧版 Cardbush 不支持插件声明时会提示 `cardbush_plugins_upgrade_required`，请同时升级。
+
+`accepted` 表示桥已持久化接收；`delivery_status` 的 `delivered` 表示平台接口成功，不表示用户已打开文件。来源、文件权限与字节校验仍由通用协议和运行时执行。
 
 ## 数据与原项目迁移
 
