@@ -9,14 +9,15 @@
 ```powershell
 cd D:\proj\cardbush-bridges
 npm ci --ignore-scripts
-npm start
+npm link --ignore-scripts
+cardbush-bridge start
 ```
 
-`npm start` 显示平台选择菜单。也可以直接选择：
+`npm link` 只需运行一次，将命令注册到当前用户的 PATH。之后可以在任意目录调用；移动源码目录后重新执行一次链接。`cardbush-bridge` 或 `cardbush-bridge --help` 显示帮助，`cardbush-bridge start` 显示平台选择菜单。也可以直接选择：
 
 ```powershell
-npm start -- feishu
-npm start -- weixin
+cardbush-bridge start feishu
+cardbush-bridge start weixin
 ```
 
 先在 Cardbush 的目标 Assistant / 会话右上角打开“连接服务”，选择相应服务；CLI 用户在目标会话输入 `/webhook`，刷新并选择。之后按终端提示配置平台账号：微信扫码，飞书填写 App ID / App Secret。**平台账号尚未配置，也会先出现连接申请。**无需复制接收地址、回调地址或令牌。
@@ -26,21 +27,28 @@ npm start -- weixin
 配置完成后可以同时启动：
 
 ```powershell
-npm start -- all
+cardbush-bridge start --all
 ```
 
-`all` 仅启动已配置且未运行的平台，未配置的平台会显示提示；不并行弹出账号输入。每个平台独立连接、重试和保存队列，一个平台失败不会终止其他平台。按 `Ctrl+C` 停止本次启动的服务。单独启动时每个平台使用一个终端即可。
+`--all` 仅启动已配置且未运行的平台，未配置的平台会显示提示；不并行弹出账号输入。每个平台独立连接、重试和保存队列，一个平台失败不会终止其他平台。按 `Ctrl+C` 停止本次启动的服务。单独启动时每个平台使用一个终端即可。
 
 ## 常用命令
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm run status` | 查看各平台本机配置和进程状态，不打印凭据；不等同于平台在线验证 |
-| `npm run connect -- feishu` | 为飞书重新选择 Cardbush 会话 |
-| `npm run connect -- weixin` | 为微信重新选择 Cardbush 会话 |
-| `npm run setup -- feishu` | 更换飞书应用凭据 |
-| `npm run login -- weixin` | 微信重新扫码登录 |
-| `npm run doctor -- feishu` | 验证飞书鉴权及机器人能力 |
+| `cardbush-bridge status` | 查看各平台本机配置和进程状态，不打印凭据；不等同于平台在线验证 |
+| `cardbush-bridge connect feishu` | 为飞书重新选择 Cardbush 会话 |
+| `cardbush-bridge connect weixin` | 为微信重新选择 Cardbush 会话 |
+| `cardbush-bridge setup feishu` | 更换飞书应用凭据 |
+| `cardbush-bridge login weixin` | 微信重新扫码登录 |
+| `cardbush-bridge doctor feishu` | 验证飞书鉴权及机器人能力 |
+| `cardbush-bridge status feishu --json` | 以 JSON 输出指定平台状态 |
+| `cardbush-bridge start --help` | 查看子命令帮助 |
+| `cardbush-bridge --version` | 查看版本 |
+
+参数错误写入 stderr 并返回退出码 `2`，运行错误返回 `1`，正常完成返回 `0`。脚本中可使用 `--no-interactive` 禁止终端询问；`status` 为只读操作，不创建目录或迁移数据。`--` 可用于终止本命令的选项解析。
+
+`cardbush-bridges`、`npm start -- feishu`、`npm start -- all` 等旧入口仍然兼容。npm 脚本需要独立的 `--` 来转发参数；日常使用直接调用 `cardbush-bridge` 即可。
 
 默认 Cardbush 入口是 `127.0.0.1:4791`；微信回复端口为 `4792`，飞书为 `4793`。App 与 CLI 使用同一协议，但各自保存上下文，默认端口同时只能由一个宿主监听。更换 Cardbush 端口时设置 `CARDBUSH_WEBHOOK_URL`，然后重新执行 `connect`。
 

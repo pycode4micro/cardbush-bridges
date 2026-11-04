@@ -1,3 +1,3 @@
 #!/usr/bin/env node
-import { main, reportError } from '../src/cli.mjs';
-await main().catch(reportError);
+// Compatibility alias for existing launchers.
+await import('./cardbush-bridge.mjs');

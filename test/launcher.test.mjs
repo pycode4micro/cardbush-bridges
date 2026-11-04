@@ -22,11 +22,11 @@ test('all starts configured adapters concurrently, isolates one failure, and the
         await new Promise(r => { release = r; });
       } });
     }
-    let finished = false; const running = main(['start', 'all']).then(() => { finished = true; });
+    let finished = false; const running = main(['start', '--all']).then(() => { finished = true; });
     for (let i = 0; i < 100 && !release; i++) await new Promise(r => setTimeout(r, 20));
     assert.equal(starts.length, 2); assert.equal(finished, false);
     assert.ok(starts.every(s => s.interactive === false && s.root === join(root, s.platform)));
-    assert.ok(notices.includes('操作未完成：fixture_adapter_failed'));
+    assert.ok(notices.includes('cardbush-bridge: error: fixture_adapter_failed'));
     release(); await running;
     bridges.push({ id: 'example', name: '示例', port: 4794, commands: ['start'], configured: () => false,
       load: async () => ({ main: async (command, options) => starts.push({ platform: 'example', command, ...options }) }) });

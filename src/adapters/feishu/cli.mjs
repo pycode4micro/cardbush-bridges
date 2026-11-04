@@ -10,7 +10,7 @@ import { connectFeishu } from './connection.mjs';
 
 export async function main(command = 'start', { root: directory, interactive = !!process.stdin.isTTY } = {}) {
   if (command === 'help' || command === '--help') {
-    console.log('首次/日常启动：npm start -- feishu\n修改凭据：npm run setup -- feishu\n更换 Cardbush 会话：npm run connect -- feishu\n检查配置：npm run doctor -- feishu'); return;
+    console.log('首次/日常启动：cardbush-bridge start feishu\n修改凭据：cardbush-bridge setup feishu\n更换 Cardbush 会话：cardbush-bridge connect feishu\n检查配置：cardbush-bridge doctor feishu'); return;
   }
   if (!['start', 'setup', 'connect', 'doctor'].includes(command)) throw Error('unknown_command');
   const root = await privateDirectory(resolve(directory)), file = join(root, 'config.json');
@@ -22,7 +22,7 @@ export async function main(command = 'start', { root: directory, interactive = !
     if (command === 'doctor' && !config.feishu) throw Error('credentials_required');
     if (command === 'start' || command === 'connect') {
       config = await connectBridge(config, { root, name: '飞书服务', signal: abort.signal, force: command === 'connect' });
-      if (command === 'connect') { console.log('绑定已保存，运行 npm start -- feishu。'); return; }
+      if (command === 'connect') { console.log('绑定已保存，运行 cardbush-bridge start feishu。'); return; }
     }
     const terminal = terminalAsk({ signal: abort.signal, interactive });
     try { config.feishu = await configure(command === 'setup' ? undefined : config.feishu, { ask: terminal.ask }); }
@@ -32,10 +32,10 @@ export async function main(command = 'start', { root: directory, interactive = !
     const queue = await readJson(join(root, 'queue.json'), null);
     if (queue && queue.appId !== config.feishu.appId) throw Error('queue_app_mismatch');
     await writeJson(file, config);
-    if (command === 'setup') { console.log('飞书应用凭据已验证并保存在本机。运行 npm start -- feishu 完成连接。'); return; }
+    if (command === 'setup') { console.log('飞书应用凭据已验证并保存在本机。运行 cardbush-bridge start feishu 完成连接。'); return; }
     if (command === 'doctor') {
       console.log('飞书应用鉴权和机器人能力正常。');
-      console.log(config.cardbush?.url ? '已有 Cardbush 连接配置。' : '尚未连接 Cardbush，运行 npm start -- feishu。');
+      console.log(config.cardbush?.url ? '已有 Cardbush 连接配置。' : '尚未连接 Cardbush，运行 cardbush-bridge start feishu。');
       console.log(queue?.owner || config.allowedSenders?.length ? '已有获准的飞书用户。' : '首次启动后需在飞书发送终端显示的配对码。'); return;
     }
     bridge = await new Bridge(root, config, api, { botOpenId: identity.openId }).load();
@@ -53,10 +53,10 @@ export async function main(command = 'start', { root: directory, interactive = !
 }
 const errors = {
   invalid_app_id: 'App ID 格式不正确，请使用飞书自建应用的 cli_ 开头标识。', invalid_app_secret: 'App Secret 不正确，请重新复制应用密钥。',
-  credentials_required: '尚未填写飞书应用凭据，请运行 npm start -- feishu。', credentials_required_noninteractive: '首次启动请在终端填写凭据，或设置 FEISHU_APP_ID 和 FEISHU_APP_SECRET。',
-  feishu_bot_not_enabled: '请先在飞书开放平台为应用开启机器人能力。', feishu_error_10003: '飞书应用凭据校验失败，请运行 npm run setup -- feishu 重新填写。',
-  connection_revoked: 'Cardbush 连接已移除或停用。需要重新连接时，停止服务后运行 npm run connect -- feishu。',
-  connection_rejected: '连接申请已被忽略，需要重新申请时运行 npm run connect -- feishu。', pairing_expired: '等待连接超时。请打开 Cardbush 后重新运行 npm start -- feishu。',
+  credentials_required: '尚未填写飞书应用凭据，请运行 cardbush-bridge start feishu。', credentials_required_noninteractive: '首次启动请在终端填写凭据，或设置 FEISHU_APP_ID 和 FEISHU_APP_SECRET。',
+  feishu_bot_not_enabled: '请先在飞书开放平台为应用开启机器人能力。', feishu_error_10003: '飞书应用凭据校验失败，请运行 cardbush-bridge setup feishu 重新填写。',
+  connection_revoked: 'Cardbush 连接已移除或停用。需要重新连接时，停止服务后运行 cardbush-bridge connect feishu。',
+  connection_rejected: '连接申请已被忽略，需要重新申请时运行 cardbush-bridge connect feishu。', pairing_expired: '等待连接超时。请打开 Cardbush 后重新运行 cardbush-bridge start feishu。',
   service_already_running: '飞书桥已经运行，请先停止原进程。', queue_app_mismatch: '队列属于另一个飞书应用。请用 CARDBUSH_FEISHU_DATA 指定新的数据目录，保留旧队列。',
   EADDRINUSE: '回复端口已被占用，请关闭重复进程，或在私有配置中修改 port。',
 };

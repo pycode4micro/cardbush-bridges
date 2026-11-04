@@ -5,6 +5,11 @@ import { randomUUID } from 'node:crypto';
 import { privateDirectory, readJson, acquireLock } from './shared/storage.mjs';
 
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
+/** Read-only path resolution for status; never migrate or create a profile. */
+export function dataDirectory(bridge, env = process.env) {
+  if (!/^[a-z][a-z0-9-]*$/.test(bridge.id)) throw Error('invalid_bridge_id');
+  return resolve(env[bridge.dataEnv] || join(env.CARDBUSH_BRIDGES_DATA || join(projectRoot, '.private'), bridge.id));
+}
 const entries = directory => readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
 export async function prepareData(bridge, { env = process.env, dataRoot = resolve(env.CARDBUSH_BRIDGES_DATA || join(projectRoot, '.private')),
   legacyRoot = dirname(projectRoot.replace(/[\\/]$/, '')), migrate = !env.CARDBUSH_BRIDGES_DATA && !env[bridge.dataEnv], log = console.log } = {}) {

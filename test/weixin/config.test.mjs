@@ -13,7 +13,7 @@ test('reply URL gives a specific correction; copy formatting is normalized witho
   for (const value of [endpoint + '?token=secret', endpoint + '#fragment', endpoint.replace('127.0.0.1', 'user:password@127.0.0.1'), endpoint.replace('127.0.0.1', 'example.com')]) {
     assert.throws(() => normalizeCardbushUrl(value), /invalid_cardbush_url/);
   }
-  assert.throws(() => validateConfig(config()), error => error.message === 'cardbush_url_required' && configurationError(error).includes('npm run setup'));
+  assert.throws(() => validateConfig(config()), error => error.message === 'cardbush_url_required' && configurationError(error).includes('cardbush-bridge setup weixin'));
 });
 test('setup retries the address before asking for a token and preserves the old config until all fields are valid', async () => {
   const previous = config(), prompts = [], notices = [];

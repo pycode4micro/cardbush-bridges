@@ -61,12 +61,12 @@ try {
   else if (command === 'setup') {
     const config = await init(), input = createInterface({ input: process.stdin, output: process.stdout });
     try { const next = await configure(config, { ask: prompt => input.question(prompt, { signal: cancel.signal }), notify: message => console.error(message) });
-      await writeJson(file('config'), next); console.log('配置已保存。现在运行 npm start -- weixin 启动微信服务。'); } finally { input.close(); }
+      await writeJson(file('config'), next); console.log('配置已保存。现在运行 cardbush-bridge start weixin 启动微信服务。'); } finally { input.close(); }
   } else if (command === 'login' || command === 'login-start') {
     // Every user-facing login entry first registers the same generic local service.
     // A QR-only flow otherwise leaves the desktop connection list empty.
     await connect(await init(), cancel.signal);
-    if (command === 'login') { await login(cancel.signal); console.log('登录已完成。运行 npm start -- weixin 保持服务在线。'); }
+    if (command === 'login') { await login(cancel.signal); console.log('登录已完成。运行 cardbush-bridge start weixin 保持服务在线。'); }
     else await loginStart(cancel.signal);
   } else if (command === 'login-check') await loginCheck(args[0], cancel.signal);
   else if (command === 'connect') await connect(await init(), cancel.signal, true);
@@ -79,9 +79,9 @@ try {
   } else console.log('Commands: start | connect | init | setup | login | login-start | login-check [verification-code]');
 } catch (error) { if (error.name !== 'AbortError') {
   const connectionError = { unsupported_cardbush: '当前 Cardbush 尚不支持自动接入，请启动更新后的版本。',
-    connection_revoked: '连接已被停用或移除。需要重新连接时运行 npm run connect，在 Cardbush 中重新选择会话。',
-    connection_rejected: '连接请求已被忽略。需要重新申请时运行 npm run connect。',
-    pairing_expired: '等待连接已超时。请打开 Cardbush 后重新运行 npm start。' }[error.message];
+    connection_revoked: '连接已被停用或移除。需要重新连接时运行 cardbush-bridge connect weixin，在 Cardbush 中重新选择会话。',
+    connection_rejected: '连接请求已被忽略。需要重新申请时运行 cardbush-bridge connect weixin。',
+    pairing_expired: '等待连接已超时。请打开 Cardbush 后重新运行 cardbush-bridge start weixin。' }[error.message];
   error.userMessage = connectionError || configurationError(error); throw error;
 } } finally { stop(); await bridge?.close(); await release(); process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); }
 }

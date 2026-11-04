@@ -15,16 +15,17 @@
 ```powershell
 cd D:\proj\cardbush-bridges
 npm ci --ignore-scripts
-npm start -- weixin
+npm link --ignore-scripts
+cardbush-bridge start weixin
 ```
 
 1. 在需要复用上下文的 Assistant 或本机会话右上角打开“连接服务”，找到“微信服务”，点击“连接”。
 2. 首次登录时，终端自动显示二维码，用微信扫码并确认。也可打开 `.private/weixin/login.png` 扫码；若微信要求验证码，在终端输入。
 3. 保持两端运行，在微信给登录的 Bot 发文字。回复使用已绑定的 Cardbush 会话、模型和插件；需要审批的执行仍在 Cardbush 内确认。
 
-不用复制地址、令牌或请求头。后续仅运行 `npm start -- weixin`，复用保存的连接和登录。已有手动配置也能继续使用。登录失效时运行 `npm run login -- weixin` 重新扫码，再启动；更换绑定会话或恢复已移除的连接时，先停止服务，运行 `npm run connect -- weixin`，在目标会话点击连接后再 `npm start -- weixin`。
+不用复制地址、令牌或请求头。后续仅运行 `cardbush-bridge start weixin`，复用保存的连接和登录。已有手动配置也能继续使用。登录失效时运行 `cardbush-bridge login weixin` 重新扫码，再启动；更换绑定会话或恢复已移除的连接时，先停止服务，运行 `cardbush-bridge connect weixin`，在目标会话点击连接后再 `cardbush-bridge start weixin`。
 
-`npm run login -- weixin` 和分步登录的 `login-start` 也会先完成同样的 Cardbush 连接，再显示二维码。终端的 `微信扫码状态：wait` 表示等待手机扫码，不代表 Bot 服务已开始收发消息；扫码完成后仍需 `npm start -- weixin`。首次接入直接使用 `npm start -- weixin` 即可串起全部步骤。
+`cardbush-bridge login weixin` 和分步登录的 `login-start` 也会先完成同样的 Cardbush 连接，再显示二维码。终端的 `微信扫码状态：wait` 表示等待手机扫码，不代表 Bot 服务已开始收发消息；扫码完成后仍需 `cardbush-bridge start weixin`。首次接入直接使用 `cardbush-bridge start weixin` 即可串起全部步骤。
 
 Cardbush 默认本机入口是 `127.0.0.1:4791`；本服务回复入口默认是 `127.0.0.1:4792/reply`。两端自动交换这两个方向的参数。连接凭据随机生成，不是硬编码密钥。
 
@@ -40,9 +41,9 @@ Cardbush 默认本机入口是 `127.0.0.1:4791`；本服务回复入口默认是
 
 需要远程或手动接入时：
 
-1. 运行 `node bin/cardbush-bridges.mjs init weixin`。在 Cardbush 的“连接服务 → 手动配置（高级）”填写名称，以及 `.private/weixin/cardbush-connection.json` 中的回复地址和请求头。远程部署须自行提供双向可达的 HTTPS 地址。
-2. 保存后，运行 `npm run setup -- weixin`，填写 Cardbush 生成的**接收消息地址**和**接收令牌**。接收地址形如 `http://127.0.0.1:4791/api/webhooks/v1/连接ID/messages`；`http://127.0.0.1:4792/reply` 属于另一方向，不能填在这里。
-3. 运行 `npm start -- weixin`。填错字段会提示并允许重输，不会丢弃旧配置；不要把私有令牌提交到仓库。
+1. 运行 `cardbush-bridge init weixin`。在 Cardbush 的“连接服务 → 手动配置（高级）”填写名称，以及 `.private/weixin/cardbush-connection.json` 中的回复地址和请求头。远程部署须自行提供双向可达的 HTTPS 地址。
+2. 保存后，运行 `cardbush-bridge setup weixin`，填写 Cardbush 生成的**接收消息地址**和**接收令牌**。接收地址形如 `http://127.0.0.1:4791/api/webhooks/v1/连接ID/messages`；`http://127.0.0.1:4792/reply` 属于另一方向，不能填在这里。
+3. 运行 `cardbush-bridge start weixin`。填错字段会提示并允许重输，不会丢弃旧配置；不要把私有令牌提交到仓库。
 
 ## 让 Agent 发送文件
 

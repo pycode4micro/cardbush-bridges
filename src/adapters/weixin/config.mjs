@@ -2,7 +2,7 @@ import { normalizeCardbushUrl, normalizeCardbushToken, validateConfig } from '..
 export { normalizeCardbushUrl, normalizeCardbushToken, validateConfig };
 export function configurationError(error) {
   return {
-    cardbush_url_required: '还没有配置 Cardbush 接收地址。请先在 Cardbush 右上角保存 Webhook 连接，再运行 npm run setup。',
+    cardbush_url_required: '还没有配置 Cardbush 接收地址。请先在 Cardbush 右上角保存 Webhook 连接，再运行 cardbush-bridge setup weixin。',
     cardbush_reply_url_used: '这是微信服务的回复地址，应填在 Cardbush 的“回复 Webhook 地址”里。这里请粘贴保存连接后生成的“接收消息地址”（通常为 4791 端口，路径以 /messages 结尾）。',
     invalid_cardbush_url: '接收地址格式不正确。请在 Cardbush 的 Webhook 窗口点击“复制接收地址”，完整粘贴生成的地址，不要填写示例地址或回复地址。',
     cardbush_token_required: '请粘贴 Cardbush Webhook 窗口生成的“接收令牌”，不要粘贴回复请求头或整个 JSON。',

@@ -28,10 +28,10 @@
 
 ```powershell
 cd D:\proj\cardbush-bridges
-npm start -- feishu
+cardbush-bridge start feishu
 ```
 
-复制到另一台电脑后，第一次先执行 `npm ci --ignore-scripts` 安装锁定版本的依赖，再运行 `npm start -- feishu`。
+复制到另一台电脑后，第一次先执行 `npm ci --ignore-scripts` 安装锁定版本的依赖，再执行 `npm link --ignore-scripts` 注册命令，之后可以在任意目录运行 `cardbush-bridge start feishu`。
 
 先在 Cardbush 的 **Assistant 或目标会话右上角 → 连接服务 → 飞书服务 → 连接**；CLI 用户用 `/webhook` 刷新并选择飞书服务。连接后终端才提示输入 App ID 和 App Secret（密钥输入不显示）。飞书凭据尚未填写时，服务也会先出现在待连接列表里。
 
@@ -76,10 +76,10 @@ npm start -- feishu
 ## 日常操作
 
 ```powershell
-npm start -- feishu         # 启动并复用已保存的连接
-npm run doctor -- feishu    # 检查应用鉴权、机器人能力及本地配置
-npm run setup -- feishu     # 重新填写应用凭据
-npm run connect -- feishu   # 重新申请连接另一个 Cardbush 上下文，完成后再 npm start -- feishu
+cardbush-bridge start feishu         # 启动并复用已保存的连接
+cardbush-bridge doctor feishu    # 检查应用鉴权、机器人能力及本地配置
+cardbush-bridge setup feishu     # 重新填写应用凭据
+cardbush-bridge connect feishu   # 重新申请连接另一个 Cardbush 上下文，完成后再 cardbush-bridge start feishu
 ```
 
 `Ctrl+C` 停止。修改配置及运行检查前，先停止已经运行的飞书桥；同一数据目录只能运行一个实例。`doctor` 验证鉴权，不能代替飞书后台的发布、事件订阅和实际收件检查。
@@ -93,7 +93,7 @@ npm run connect -- feishu   # 重新申请连接另一个 Cardbush 上下文，�
 | 独立数据目录 | 环境变量 `CARDBUSH_FEISHU_DATA` 指定绝对路径 |
 | 无交互凭据 | `FEISHU_APP_ID`、`FEISHU_APP_SECRET`；不会打印到日志 |
 | 非默认 Cardbush 端口 | `CARDBUSH_WEBHOOK_URL`，例如 `http://127.0.0.1:6112`，仅本机地址 |
-| 桥回复端口 | 停止服务后修改 `.private/feishu/config.json` 的 `port`，再 `npm run connect -- feishu` 更新绑定 |
+| 桥回复端口 | 停止服务后修改 `.private/feishu/config.json` 的 `port`，再 `cardbush-bridge connect feishu` 更新绑定 |
 | 获准用户 | 配置 `allowedSenders` 为飞书 `open_id` 数组；未设置时使用首次配对用户 |
 | 指定群聊 | 配置 `allowedChats` 为 `chat_id` 数组，另开通 `im:message.group_at_msg:readonly` 并发布；只处理获准用户在指定群中 @机器人的消息 |
 
@@ -107,8 +107,8 @@ npm run connect -- feishu   # 重新申请连接另一个 Cardbush 上下文，�
 
 - **等待 Cardbush 启动**：启动 Cardbush，并在目标上下文右上角连接服务；无需复制 `/reply` 地址。
 - **找不到机器人或收不到消息**：确认机器人能力已启用、长连接在线、订阅了 `im.message.receive_v1`、权限与版本已发布、应用可用范围包含你，且已完成私聊配对。
-- **鉴权失败**：运行 `npm run setup -- feishu` 核对自建应用的 App ID / Secret。只保存新的密钥不会替你发布飞书应用。
-- **`connection_revoked`**：原 Cardbush 连接被删除或停用；停止桥后运行 `npm run connect -- feishu`，重新在应用里确认。
+- **鉴权失败**：运行 `cardbush-bridge setup feishu` 核对自建应用的 App ID / Secret。只保存新的密钥不会替你发布飞书应用。
+- **`connection_revoked`**：原 Cardbush 连接被删除或停用；停止桥后运行 `cardbush-bridge connect feishu`，重新在应用里确认。
 - **`service_already_running` / 端口占用**：停止旧进程后重启。微信桥默认用 4792，飞书桥默认用 4793，可以并存。
 - **消息/文件等待重试**：查看终端机器错误码和飞书应用权限、网络状态。队列在 `.private/feishu/queue.json`，不要通过删队列的方式重试，以免丢失进度。
 - **Cardbush 未完成本次处理**：进入对应 Assistant / 会话查看运行错误，恢复可用的模型配置后重试。桥不会把 Runtime 错误伪装为发送成功。
