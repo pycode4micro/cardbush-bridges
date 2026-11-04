@@ -1,0 +1,20 @@
+{
+  "name": "cardbush-bridges",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent multi-platform Bot bridges for the generic Cardbush Webhook protocol",
+  "engines": { "node": ">=22.13.0" },
+  "bin": { "cardbush-bridges": "bin/cardbush-bridges.mjs" },
+  "scripts": {
+    "start": "node bin/cardbush-bridges.mjs start",
+    "connect": "node bin/cardbush-bridges.mjs connect",
+    "setup": "node bin/cardbush-bridges.mjs setup",
+    "login": "node bin/cardbush-bridges.mjs login",
+    "doctor": "node bin/cardbush-bridges.mjs doctor",
+    "status": "node bin/cardbush-bridges.mjs status",
+    "test": "node --test test/*.test.mjs test/weixin/*.test.mjs test/feishu/*.test.mjs",
+    "test:cardbush": "node --test test/weixin/cardbush.integration.mjs test/feishu/cardbush.integration.mjs"
+  },
+  "dependencies": { "@larksuiteoapi/node-sdk": "1.76.0", "qrcode": "1.5.4" }
+}
