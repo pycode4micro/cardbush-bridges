@@ -35,7 +35,7 @@ export async function connectLocalService(config, { name, save, onStatus = () =>
     pairing = { requestId: randomUUID(), secret: randomBytes(32).toString('hex'), baseUrl: base.origin };
     config = { ...config, pairing }; await save(config);
   }
-  let announced = '', submitted = false;
+  let announced = '', submitted = false, renewed = false;
   const status = value => { if (announced !== value) { announced = value; onStatus(value); } };
   const deadline = Date.now() + 10 * 60000;
   while (Date.now() < deadline) {
@@ -66,6 +66,13 @@ export async function connectLocalService(config, { name, save, onStatus = () =>
       status('waiting_for_authorization');
     } catch (error) {
       if (signal?.aborted) throw error;
+      // A saved, unapproved request can expire while the bridge is stopped.
+      // Renew that request once; revoked authorized grants still fail above.
+      if (error.message === 'pairing_expired' && !renewed) {
+        pairing = { requestId: randomUUID(), secret: randomBytes(32).toString('hex'), baseUrl: base.origin };
+        config = { ...config, pairing }; await save(config);
+        renewed = true; submitted = false; announced = ''; continue;
+      }
       if (['unsupported_cardbush', 'invalid_pairing_response', 'connection_rejected', 'connection_revoked', 'pairing_conflict', 'pairing_expired', 'pairing_limit', 'unauthorized', 'invalid_parameters'].includes(error.message)) throw error;
       status('waiting_for_cardbush'); submitted = false;
     }
