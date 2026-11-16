@@ -12,6 +12,7 @@ import { bridgeInstance, advertisePlugins, withdrawPlugins, invokePlugin } from 
 import { incomingAttachments, mediaType } from './media.mjs';
 import { WeixinAttachments, attachmentInfo } from './attachments.mjs';
 import { WeixinPresence } from './presence.mjs';
+import { OutboundWorker } from '../../shared/outbound-worker.mjs';
 export { validateConfig } from './config.mjs';
 
 export const hash = value => createHash('sha256').update(value).digest('hex');
@@ -21,11 +22,12 @@ export function splitText(text, limit = 3500) {
   if (part) chunks.push(part); return chunks;
 }
 export class Bridge {
-  constructor(root, config, account, api, { fetcher = localServiceFetch, log = console.log } = {}) {
+  constructor(root, config, account, api, { fetcher = localServiceFetch, log = console.log, now = Date.now } = {}) {
     this.root = root; this.config = validateConfig(config); this.account = account; this.api = api; this.fetch = fetcher; this.log = log;
     this.state = { version: 1, cursor: '', records: [], outbound: [] }; this.writes = Promise.resolve(); this.abort = new AbortController();
     this.instanceId = bridgeInstance(); this.plugins = createPlugins(this);
     this.attachments = new WeixinAttachments(this); this.presence = new WeixinPresence(api, { log });
+    this.outbound = new OutboundWorker(this, (item, stage) => this.sendItem(item, stage), { now });
   }
   async load() {
     this.state = await readJson(join(this.root, 'queue.json'), this.state);
@@ -104,7 +106,7 @@ export class Bridge {
       if (!record || record.sender !== event.senderId || event.conversationId !== this.account.id + ':' + record.sender) throw Error('unknown_message');
       const existing = state.outbound.find(item => item.eventId === event.eventId);
       if (existing) { if (existing.fingerprint !== fingerprint) throw Error('event_id_conflict'); return; }
-      if (state.outbound.filter(item => !item.done).length >= 128) throw Error('outbound_queue_full');
+      if (state.outbound.filter(item => this.outbound.eligible(item)).length >= 128) throw Error('outbound_queue_full');
       await mkdir(join(this.root, 'outbound-files'), { recursive: true, mode: 0o700 });
       for (const [index, bytes] of files.entries()) {
         const file = this.outboundFile(event.eventId, index);
@@ -112,43 +114,46 @@ export class Bridge {
         catch (error) { if (error.code !== 'EEXIST' || digest(await readFile(file)) !== event.files[index].sha256) throw error; }
       }
       state.outbound.push({ eventId: event.eventId, fingerprint, messageId: event.messageId, text: event.text,
-        parts: splitText(event.text), files: event.files, kind, textSent: 0, filesSent: 0, done: false });
+        parts: splitText(event.text), files: event.files, kind, textSent: 0, filesSent: 0, done: false,
+        sourceRef: event.sourceRef, status: 'queued', createdAt: this.outbound.now(), attempts: 0 });
     });
+    this.outbound.wake();
     return { protocol: 'cardbush.webhook.v1', type: 'message.accepted', eventId: event.eventId, status: 'accepted' };
   }
   async advertise() {
     return advertisePlugins(this, { text: true, files: true, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_TOTAL_BYTES });
   }
-  async sendOutbound() {
-    for (const item of this.state.outbound.filter(item => !item.done)) {
-      if (this.abort.signal.aborted) return;
-      try {
-        const record = this.state.records.find(r => r.id === item.messageId);
-        if (!record?.context) throw Error('unknown_message');
-        for (let index = item.textSent; index < item.parts.length; index++) {
-          await this.api.send(record.sender, record.context, item.parts[index], 'cb-' + hash(item.eventId + ':text:' + index).slice(0, 40), this.abort.signal);
-          await this.write(state => { state.outbound.find(o => o.eventId === item.eventId).textSent = index + 1; });
+  sendOutbound() { return this.outbound.process(); }
+  async releaseOutbound(item) {
+    for (let index = 0; index < item.files.length; index++) await unlink(this.outboundFile(item.eventId, index)).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    await this.write(state => { state.outbound.find(value => value.eventId === item.eventId).filesReleased = true; });
+  }
+  async sendItem(item, stage) {
+    const record = this.state.records.find(r => r.id === item.messageId);
+    if (!record?.context) throw Error('unknown_message');
+    for (let index = item.textSent; index < item.parts.length; index++) {
+      await stage('sending_text', () => this.api.send(record.sender, record.context, item.parts[index], 'cb-' + hash(item.eventId + ':text:' + index).slice(0, 40), this.abort.signal));
+      await this.write(state => { state.outbound.find(o => o.eventId === item.eventId).textSent = index + 1; });
+    }
+    for (let index = item.filesSent; index < item.files.length; index++) {
+      const file = item.files[index], bytes = await readFile(this.outboundFile(item.eventId, index));
+      if (bytes.length !== file.size || digest(bytes) !== file.sha256) throw Error('outbound_file_changed');
+      const clientId = 'cb-' + hash(item.eventId + ':file:' + index).slice(0, 40), kind = item.kind ?? 'file';
+      if (this.api.prepareMedia && this.api.sendPrepared) {
+        let uploaded = this.state.outbound.find(o => o.eventId === item.eventId).files[index].uploaded;
+        if (!uploaded) {
+          uploaded = await stage('uploading', () => this.api.prepareMedia(record.sender, { ...file, bytes }, kind, this.abort.signal));
+          await this.write(state => { state.outbound.find(o => o.eventId === item.eventId).files[index].uploaded = uploaded; });
         }
-        for (let index = item.filesSent; index < item.files.length; index++) {
-          const file = item.files[index], bytes = await readFile(this.outboundFile(item.eventId, index));
-          if (bytes.length !== file.size || digest(bytes) !== file.sha256) throw Error('outbound_file_changed');
-          const clientId = 'cb-' + hash(item.eventId + ':file:' + index).slice(0, 40), kind = item.kind ?? 'file';
-          if (this.api.prepareMedia && this.api.sendPrepared) {
-            let uploaded = this.state.outbound.find(o => o.eventId === item.eventId).files[index].uploaded;
-            if (!uploaded) {
-              uploaded = await this.api.prepareMedia(record.sender, { ...file, bytes }, kind, this.abort.signal);
-              await this.write(state => { state.outbound.find(o => o.eventId === item.eventId).files[index].uploaded = uploaded; });
-            }
-            await this.api.sendPrepared(record.sender, record.context, uploaded, clientId, this.abort.signal);
-          } else await this.api[{ file: 'sendFile', image: 'sendImage', video: 'sendVideo' }[kind]](record.sender, record.context, { ...file, bytes }, clientId, this.abort.signal);
-          await this.write(state => { state.outbound.find(o => o.eventId === item.eventId).filesSent = index + 1; });
-        }
-        await this.write(state => { state.outbound.find(o => o.eventId === item.eventId).done = true; });
-        for (let index = 0; index < item.files.length; index++) await unlink(this.outboundFile(item.eventId, index)).catch(() => {});
-      } catch (error) { if (!this.abort.signal.aborted) this.log('File/message retry: ' + safeError(error)); }
+        await stage('sending_file', () => this.api.sendPrepared(record.sender, record.context, uploaded, clientId, this.abort.signal));
+      } else await stage('sending_file', () => this.api[{ file: 'sendFile', image: 'sendImage', video: 'sendVideo' }[kind]](record.sender, record.context, { ...file, bytes }, clientId, this.abort.signal));
+      await this.write(state => { state.outbound.find(o => o.eventId === item.eventId).filesSent = index + 1; });
     }
   }
   processOnce() {
+    return Promise.all([this.processInbox(), this.sendOutbound()]);
+  }
+  processInbox() {
     if (!this.processing) this.processing = this.processWork().finally(() => { this.processing = undefined; });
     return this.processing;
   }
@@ -179,7 +184,6 @@ export class Bridge {
       } catch (e) { if (!this.abort.signal.aborted) this.log('Message retry: ' + safeError(e)); }
     }
     await this.presence.sync(this.state.records, this.abort.signal);
-    await this.sendOutbound();
   }
   async listen(port = this.config.port) {
     this.server = createServer((req, res) => {
@@ -198,21 +202,25 @@ export class Bridge {
   }
   async run() {
     await this.listen(); this.log('Weixin bridge ready; callback listening on 127.0.0.1:' + this.config.port + '/reply');
-    await this.presence.start(this.abort.signal);
     const advertise = () => this.advertise().catch(error => { if (!this.abort.signal.aborted) this.log('Cardbush capability registration: ' + safeError(error)); });
-    await advertise();
+    const startup = Promise.all([this.presence.start(this.abort.signal), advertise()]);
     const heartbeat = async () => { while (!this.abort.signal.aborted) { await delay(15000, null, { signal: this.abort.signal }); await advertise(); } };
-    const work = async () => { while (!this.abort.signal.aborted) { await this.processOnce(); await delay(1000, null, { signal: this.abort.signal }); } };
+    const work = async () => { while (!this.abort.signal.aborted) { await this.processInbox(); await delay(1000, null, { signal: this.abort.signal }); } };
+    const notifications = async () => { while (!this.abort.signal.aborted) {
+      await this.outbound.notify();
+      for (const item of this.state.outbound.filter(item => item.done && !item.filesReleased)) await this.releaseOutbound(item).catch(() => {});
+      await delay(1000, null, { signal: this.abort.signal });
+    } };
     const poll = async () => { while (!this.abort.signal.aborted) {
       try { const update = await this.api.updates(this.state.cursor, this.abort.signal); await this.ingest(update); await delay(200, null, { signal: this.abort.signal }); }
       catch (e) { if (this.abort.signal.aborted) break; if (e.message === 'login_expired') throw e; this.log('Weixin reconnect: ' + safeError(e)); await delay(3000, null, { signal: this.abort.signal }); }
     } };
-    try { await Promise.all([work(), poll(), heartbeat()]); } finally { await this.close(); }
+    try { await Promise.all([startup, work(), poll(), heartbeat(), this.outbound.run(), notifications()]); } finally { await this.close(); }
   }
   async close() {
     if (this.closing) return this.closing;
     return this.closing = (async () => { this.abort.abort();
-      await this.processing?.catch(() => {});
+      await Promise.allSettled([this.processing, this.outbound.processing, this.outbound.notifying]);
       await Promise.allSettled([withdrawPlugins(this), this.presence.stop(AbortSignal.timeout(3000)), ...this.attachments.pending.values()]);
       if (this.server) { this.server.closeAllConnections(); await new Promise(r => this.server.close(r)); this.server = undefined; } await this.writes; })();
   }

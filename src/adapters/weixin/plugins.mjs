@@ -1,4 +1,5 @@
 import { messagingHandlers } from '../../shared/plugins.mjs';
+import { deliverySnapshot } from '../../shared/outbound-worker.mjs';
 
 export function createPlugins(bridge) {
   const handlers = messagingHandlers(bridge, event => bridge.state.records.some(record => record.id === event.messageId && record.sender === event.senderId
@@ -8,7 +9,7 @@ export function createPlugins(bridge) {
       || !event.arguments.file || Object.keys(event.arguments.file).join() !== 'part' || event.arguments.file.part !== event.files[0].part
       || event.arguments.caption !== undefined && (typeof event.arguments.caption !== 'string' || event.arguments.caption.length > 32000)) throw Error('invalid_tool_arguments');
     await bridge.receiveSend({ ...event, type: 'message.send', text: event.arguments.caption ?? '' }, files, kind);
-    return { deliveryId: event.eventId, status: 'queued', deliveryConfirmed: false };
+    return deliverySnapshot(bridge.state.outbound.find(item => item.eventId === event.eventId));
   };
   handlers.list_attachments = async (event, files) => {
     if (files.length || Object.keys(event.arguments).some(key => !['cursor', 'limit'].includes(key))) throw Error('invalid_tool_arguments');
@@ -33,7 +34,7 @@ export function createPlugins(bridge) {
         inputSchema: { type: 'object', properties: { cursor: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 10 } }, additionalProperties: false } },
       { name: 'download_attachment', description: '根据微信来信或 list_attachments 中的 attachment_id 下载并解密附件，返回 localPath、类型和 SHA256。桥与 Cardbush 需同机；图片随后用 inject_image_input 查看，视频和文件用现有读取工具处理。只允许当前用户的附件，无任意 URL 或保存路径参数。',
         inputSchema: { type: 'object', properties: { attachment_id: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, required: ['attachment_id'], additionalProperties: false } },
-      { name: 'delivery_status', description: '查询本次来信触发的微信文字、图片、视频或文件发送状态。delivered 表示微信接口成功，不表示用户已打开。', readOnly: true,
+      { name: 'delivery_status', description: 'Read delivery state for this incoming message: queued, uploading, sending, retrying, delivered or failed. Includes phase, attempts, retry deadline, timings and the latest transport error when available. Delivered means the platform API accepted the message, not that the user opened it.', readOnly: true,
         inputSchema: { type: 'object', properties: { delivery_id: { type: 'string', minLength: 1 } }, required: ['delivery_id'], additionalProperties: false } },
     ],
   }, handlers }];

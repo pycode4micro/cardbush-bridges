@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { validateBotFiles } from './bot-outbound.mjs';
+import { deliverySnapshot } from './outbound-worker.mjs';
 
 export const bridgeInstance = () => randomUUID();
 export async function advertisePlugins(bridge, capabilities) {
@@ -13,6 +14,7 @@ export async function advertisePlugins(bridge, capabilities) {
   const body = await response.json();
   if (!response.ok || body.protocol !== 'cardbush.webhook.v1' || body.status !== 'connected' || !body.features?.includes('bridge_plugins')) throw Error('cardbush_plugins_upgrade_required');
   bridge.ready = true;
+  bridge.deliveryEvents = body.features.includes('delivery_events');
 }
 export async function withdrawPlugins(bridge) {
   bridge.ready = false;
@@ -41,21 +43,20 @@ export function messagingHandlers(bridge, ownsMessage) {
       fields(event.arguments, ['text']);
       if (files.length || typeof event.arguments.text !== 'string' || !event.arguments.text.trim() || event.arguments.text.length > 32000) throw Error('invalid_tool_arguments');
       await bridge.receiveSend({ ...event, type: 'message.send', text: event.arguments.text }, files);
-      return { deliveryId: event.eventId, status: 'queued', deliveryConfirmed: false };
+      return deliverySnapshot(bridge.state.outbound.find(item => item.eventId === event.eventId));
     },
     async send_file(event, files) {
       fields(event.arguments, ['file', 'caption']);
       if (files.length !== 1 || !event.arguments.file || Object.keys(event.arguments.file).join() !== 'part'
         || event.arguments.file.part !== event.files[0].part || event.arguments.caption !== undefined && typeof event.arguments.caption !== 'string') throw Error('invalid_tool_arguments');
       await bridge.receiveSend({ ...event, type: 'message.send', text: event.arguments.caption ?? '' }, files);
-      return { deliveryId: event.eventId, status: 'queued', deliveryConfirmed: false };
+      return deliverySnapshot(bridge.state.outbound.find(item => item.eventId === event.eventId));
     },
     async delivery_status(event, files) {
       fields(event.arguments, ['delivery_id']);
       if (files.length || typeof event.arguments.delivery_id !== 'string' || !ownsMessage(event)) throw Error('invalid_tool_arguments');
       const item = bridge.state.outbound.find(item => item.eventId === event.arguments.delivery_id && item.messageId === event.messageId);
-      return item ? { deliveryId: item.eventId, status: item.done ? 'delivered' : 'queued', deliveryConfirmed: item.done,
-        textPartsSent: item.textSent, filesSent: item.filesSent } : { status: 'not_found' };
+      return item ? deliverySnapshot(item) : { status: 'not_found' };
     },
   };
 }

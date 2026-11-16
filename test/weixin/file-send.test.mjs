@@ -59,7 +59,7 @@ test('generic multipart callback is verified and durably queued; duplicate/resta
     await send(event); assert.equal(bridge.state.outbound.length, 1);
     assert.deepEqual(await readFile(bridge.outboundFile(event.eventId, 0)), bytes);
     await bridge.processOnce(); assert.equal(sends.length, 1); await bridge.close();
-    bridge = await new Bridge(root, config, account, api, { log() {} }).load(); await bridge.processOnce();
+    bridge = await new Bridge(root, config, account, api, { log() {}, now: () => Date.now() + 1001 }).load(); await bridge.processOnce();
     assert.equal(sends.length, 2); assert.equal(sends[0][3], sends[1][3]); assert.equal(sends[1][0], 'owner'); assert.equal(sends[1][1], 'original-context');
     assert.deepEqual(sends[1][2].bytes, bytes); assert.equal(bridge.state.outbound[0].done, true);
     await bridge.receive(event, [bytes]); await bridge.processOnce(); assert.equal(sends.length, 2);

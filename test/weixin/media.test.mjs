@@ -78,6 +78,7 @@ for (const kind of ['image', 'video', 'file']) test(`${kind} native send reuses 
       size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }];
     await bridge.receive(event, [bytes]); await bridge.sendOutbound(); assert.equal(uploads, 1); assert.equal(bridge.state.outbound[0].done, false);
     await bridge.close(); bridge = await new Bridge(root, config, account, api, { log() {} }).load();
+    bridge.outbound.now = () => Date.now() + 1001;
     await bridge.sendOutbound(); assert.equal(uploads, 1); assert.equal(sent.length, 2); assert.deepEqual(sent[0], sent[1]);
     assert.equal(sent[1].to_user_id, 'owner'); assert.equal(sent[1].context_token, 'context-1');
     assert.equal(sent[1].item_list[0].type, { image: 2, video: 5, file: 4 }[kind]);
