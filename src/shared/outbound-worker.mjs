@@ -5,6 +5,10 @@ export function deliverySnapshot(item) {
     ...Object.fromEntries(['phase', 'attempts', 'createdAt', 'startedAt', 'updatedAt', 'completedAt', 'nextAttemptAt', 'lastError', 'timings']
       .filter(key => item[key] !== undefined).map(key => [key, item[key]])) };
 }
+export function deliveryReceipt(bridge, item) {
+  return { ...deliverySnapshot(item), completion: bridge.deliveryEvents && item.sourceRef && bridge.outbound?.notify
+    ? { mode: 'event', recipient: 'assistant', eventType: 'bridge_delivery_result' } : { mode: 'query' } };
+}
 const permanent = new Set(['unknown_message', 'outbound_file_changed', 'invalid_file', 'media_type_mismatch', 'untrusted_upload_host', 'ENOENT']);
 const errorCode = error => /^[a-z][a-z0-9_-]{0,99}$/i.test(error?.message ?? '') ? error.message
   : /^[A-Z_]+$/.test(error?.code ?? '') ? error.code
@@ -46,7 +50,8 @@ export class OutboundWorker {
         if (this.bridge.abort.signal.aborted) return;
         const code = errorCode(error), failed = permanent.has(code);
         await this.update(id, current => {
-          current.lastError = { code, at: this.now(), phase: current.phase ?? 'sending' };
+          current.lastError = { code, at: this.now(), phase: current.phase ?? 'sending',
+            ...(error.transportDetails ? { details: error.transportDetails } : {}) };
           current.status = failed ? 'failed' : 'retrying';
           if (failed) { current.completedAt = this.now(); current.notificationResult = deliverySnapshot(current); }
           else current.nextAttemptAt = this.now() + Math.min(30000, 1000 * 2 ** Math.min(5, (current.attempts ?? 1) - 1));

@@ -9,6 +9,15 @@ import { Bridge } from '../../src/adapters/weixin/bridge.mjs';
 import { incomingAttachments, downloadMedia, mediaType, MAX_MEDIA_BYTES } from '../../src/adapters/weixin/media.mjs';
 import { samples, key, encrypt, mediaItem, config, account, update, toolEvent } from './media-helpers.mjs';
 
+test('CDN failures preserve HTTP/numeric error facts without disclosing headers or upload tickets', async () => {
+  for (const [status, code, expected] of [[500, '-5104001', 'weixin_upload_http_500_cdn_-5104001'],
+    [403, 'credential-secret', 'weixin_upload_http_403'], [200, '', 'weixin_upload_receipt_missing']]) {
+    const api = new WeixinApi(account, async url => String(url).includes('getuploadurl') ? Response.json({ upload_param: 'private-ticket' })
+      : new Response(null, { status, headers: { 'x-error-code': code, 'x-error-message': 'private-secret' } }));
+    await assert.rejects(api.prepareMedia('owner', { name: 'image.png', bytes: samples.image }, 'image'), error => error.message === expected);
+  }
+});
+
 for (const kind of ['image', 'video', 'file']) for (const encoding of ['raw', 'hex']) test(`${kind} downloads real bytes with ${encoding} key, bounded CDN transport and no API credentials`, async () => {
   const attachment = incomingAttachments([mediaItem(kind, { encoding, fullUrl: encoding === 'raw' })], 'message').attachments[0];
   const result = await downloadMedia(attachment, async (url, options) => {

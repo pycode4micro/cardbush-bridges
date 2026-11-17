@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Independent multi-platform Bot bridges for the generic Cardbush Webhook protocol",
-  "engines": { "node": ">=22.13.0" },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "bin": {
     "cardbush-bridge": "bin/cardbush-bridge.mjs",
     "cardbush-bridges": "bin/cardbush-bridges.mjs"
@@ -19,5 +21,12 @@
     "test": "node --test test/*.test.mjs test/weixin/*.test.mjs test/feishu/*.test.mjs",
     "test:cardbush": "node --test test/weixin/cardbush.integration.mjs test/weixin/media.integration.mjs test/feishu/cardbush.integration.mjs"
   },
-  "dependencies": { "@larksuiteoapi/node-sdk": "1.76.0", "qrcode": "1.5.4" }
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.76.0",
+    "agent-base": "7.1.4",
+    "https-proxy-agent": "7.0.6",
+    "qrcode": "1.5.4",
+    "socks-proxy-agent": "8.0.5",
+    "undici": "7.30.2"
+  }
 }

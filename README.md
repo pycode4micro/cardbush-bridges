@@ -20,6 +20,26 @@ cardbush-bridge start feishu
 cardbush-bridge start weixin
 ```
 
+### 网络模式
+
+默认无代理启动。网络选项对微信、飞书及 `start --all` 一致，也可用于 `login`、`login-start`、`login-check`、`doctor` 等需要联网的命令：
+
+```powershell
+cardbush-bridge start weixin                       # 默认直连
+cardbush-bridge start weixin --no-proxy             # 显式直连
+cardbush-bridge start weixin --proxy system         # 使用系统代理
+cardbush-bridge start weixin --proxy http://127.0.0.1:7897
+cardbush-bridge start --all --proxy socks5://127.0.0.1:7897
+```
+
+选项仅作用于本次启动，不写入账号配置；下次不带选项仍为直连。支持 HTTP、HTTPS 和 SOCKS5 代理 URL（包括 URL 编码的用户名和密码）。不要分享包含代理密码的命令。无论选择哪种模式，本机 Cardbush 的回环发现、授权、消息及插件回调都直连。远程 Cardbush HTTPS 连接和平台的登录、文件上传下载、消息、飞书 WebSocket 使用同一网络策略。
+
+- **direct**：忽略继承的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。Windows 使用自带 PowerShell/.NET 启动按需的本机认证隧道，为连接和 DNS 绑定物理 IPv4 上联网卡，避免全局 TUN/Fake-IP 再次接管；TLS 仍由 Node 校验证书和加密，隧道不解密内容。不修改代理软件、系统路由或 DNS。需要活动的物理 IPv4 默认路由及该网卡的 DNS；不满足时明确报错，不偷偷退回代理。更换物理网卡或 DNS 后重启桥。其他系统使用普通直连套接字，操作系统 VPN/TUN 路由仍需由用户配置。
+- **system**：Windows 使用当前用户系统代理及绕过规则（含系统可解析的自动配置）；macOS 使用系统静态代理，PAC 模式会明确报错；Linux 使用标准代理环境变量及 `NO_PROXY`。系统代理路由短暂缓存 30 秒。
+- **指定 URL**：所有远程平台连接使用指定代理，重连沿用同一策略。代理失败时返回错误，不静默换成直连。代理口令不进入桥的普通日志或持久化队列。
+
+Windows 网络辅助文件随源码/npm 包一起交付，从模块位置加载，不依赖当前工作目录。网络辅助进程仅监听带随机口令的回环端口，随桥退出；不会向局域网开放端口。
+
 先在 Cardbush 的目标 Assistant / 会话右上角打开“连接服务”，选择相应服务；CLI 用户在目标会话输入 `/webhook`，刷新并选择。之后按终端提示配置平台账号：微信扫码，飞书填写 App ID / App Secret。**平台账号尚未配置，也会先出现连接申请。**无需复制接收地址、回调地址或令牌。
 
 飞书应用仍需开启机器人、消息权限与长连接事件并发布。具体步骤见 [飞书接入](docs/feishu.md)；微信见 [微信接入](docs/weixin.md)。

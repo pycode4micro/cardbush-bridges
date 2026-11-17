@@ -1,5 +1,11 @@
 # 微信 ↔ Cardbush 独立桥接服务
 
+## 发送执行反馈
+
+发送工具接收后返回传输状态及 `completion`：完成通知已协商且适配器有通知 Worker 时，返回 `mode=event`、`recipient=assistant`、`eventType=bridge_delivery_result`；否则返回 `mode=query`。这是能力事实，不附带模型下一步指令，也不增加发送后的复核。`delivered` 仍只表示平台 API 接受，不表示用户已阅读。
+
+平台拒绝请求时，`lastError` 保留准确阶段和错误码，`details` 可包含操作、HTTP 状态、数字 `ret`/`errcode` 及最多 512 字符的脱敏平台说明。账号凭据、上下文令牌、媒体密钥和 URL 不进入该说明。文字发送、上传及媒体发送各自记账，不把 `sending_text` 失败解释成上传失败，也不猜测平台数字错误码的含义。重试和终态通知仍由持久化 Worker 驱动，不依赖模型轮询。
+
 微信代码全部位于这个独立目录。**不依赖 OpenClaw，不安装它的插件，不调用它的模型或网关。**微信扫码、长轮询和发送按照腾讯公开的 iLink 协议独立实现；推理、插件执行与上下文由 Cardbush 通用 Webhook 提供。
 
 ```text
@@ -108,3 +114,9 @@ npm run test:cardbush
 - 上游说明基于客户端行为，不构成完整服务端契约。该项目只参考协议文档，运行时不加载上游源码。
 
 用户给出的 `npx -y @tencent-weixin/openclaw-weixin-cli@latest install` 是 OpenClaw 专用安装器，不用于本服务。本服务直接与腾讯接口通信。
+
+## 网络与图片上传诊断
+
+启动默认直连；需要代理时使用 `cardbush-bridge start weixin --proxy system` 或 `--proxy http://127.0.0.1:7897`，完整说明见 [网络模式](../README.md#网络模式)。扫码、API、CDN 和重连共用该模式。Windows 默认直连会绑定物理 IPv4 网卡和 DNS，可避免全局 TUN 代理导致的微信 CDN 上传失败。
+
+上传 HTTP 错误保留状态码及数字形式的 `x-error-code`，例如 `weixin_upload_http_500_cdn_-5104001`；HTTP 200 缺少媒体回执单独返回 `weixin_upload_receipt_missing`。不记录上传 URL、密钥、原始错误正文或任意响应头。`attempts` 包括首次尝试，`nextAttemptAt` 是下一次重试时间，`timings` 是各阶段累计毫秒数。

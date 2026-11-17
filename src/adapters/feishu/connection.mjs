@@ -1,10 +1,11 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 
-export function connectFeishu(config, bridge, { sdk = lark, log = console.log, signal } = {}) {
+export function connectFeishu(config, bridge, { sdk = lark, log = console.log, signal, network } = {}) {
   signal?.throwIfAborted();
   // Never pass SDK error/request objects to logs: they may contain credentials.
   const logger = { error() {}, warn() {}, info() {}, debug() {}, trace() {} };
   const client = new sdk.WSClient({ appId: config.appId, appSecret: config.appSecret, domain: sdk.Domain.Feishu,
+    ...(network ? { agent: network.agent, httpInstance: network.httpInstance } : {}),
     logger, loggerLevel: sdk.LoggerLevel.error, autoReconnect: true, handshakeTimeoutMs: 15000,
     onReady: () => log('飞书长连接已建立。可以在开放平台保存“使用长连接接收事件”，并订阅 im.message.receive_v1。'),
     onReconnecting: () => log('飞书连接中断，正在自动重连。'), onReconnected: () => log('飞书连接已恢复。'),

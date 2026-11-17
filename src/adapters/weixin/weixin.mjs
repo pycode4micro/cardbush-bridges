@@ -1,5 +1,6 @@
 import { randomBytes, createHash, createCipheriv } from 'node:crypto';
 import { CDN_BASE, MAX_MEDIA_BYTES, cdnUrl, downloadMedia, mediaType } from './media.mjs';
+import { platformError, requestSecrets } from '../../shared/platform-error.mjs';
 
 export const API_BASE = 'https://ilinkai.weixin.qq.com';
 // Wire compatibility reference: Tencent/openclaw-weixin 874637a, protocol 2.4.10.
@@ -27,11 +28,13 @@ export class WeixinApi {
     const response = await this.fetch(new URL(path, apiBase(base) + '/'), { method: body === undefined ? 'GET' : 'POST',
       redirect: 'error', headers, body: body === undefined ? undefined : JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout) });
-    if (!response.ok) { await response.body?.cancel(); throw Error('weixin_http_' + response.status); }
+    const operation = path.split('?')[0].split('/').at(-1);
+    if (!response.ok) { await response.body?.cancel(); throw platformError('weixin_http_' + response.status, { operation, httpStatus: response.status }); }
     // message_id is uint64. Preserve the source digits instead of rounded JS numbers.
     const result = JSON.parse((await response.text()) || '{}', (key, value, context) => key === 'message_id' && typeof value === 'number'
       ? context?.source ?? (Number.isSafeInteger(value) ? String(value) : (() => { throw Error('unsafe_message_id'); })()) : value);
-    if (result.ret || result.errcode) throw Error(result.ret === -14 || result.errcode === -14 ? 'login_expired' : 'weixin_error_' + (result.errcode || result.ret));
+    if (result.ret || result.errcode) throw platformError(result.ret === -14 || result.errcode === -14 ? 'login_expired' : 'weixin_error_' + (result.errcode || result.ret),
+      { operation, httpStatus: response.status, ret: result.ret, errcode: result.errcode, message: result.errmsg }, [this.account.token, ...requestSecrets(body)]);
     return result;
   }
   qr(signal) { return this.request('ilink/bot/get_bot_qrcode?bot_type=3', { local_token_list: [] }, { authenticated: false, timeout: 15000, signal }); }
@@ -73,8 +76,10 @@ export class WeixinApi {
     catch { throw Error('untrusted_upload_host'); }
     const response = await this.fetch(url, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/octet-stream' },
       body: encrypted, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000) });
-    const parameter = response.headers.get('x-encrypted-param'); await response.body?.cancel();
-    if (response.status !== 200 || !parameter) throw Error('file_upload_failed');
+    const parameter = response.headers.get('x-encrypted-param'), cdnCode = response.headers.get('x-error-code');
+    await response.body?.cancel();
+    if (response.status !== 200) throw Error('weixin_upload_http_' + response.status + (/^-?\d{1,12}$/.test(cdnCode ?? '') ? '_cdn_' + cdnCode : ''));
+    if (!parameter) throw Error('weixin_upload_receipt_missing');
     const media = { encrypt_query_param: parameter, aes_key: Buffer.from(key.toString('hex')).toString('base64'), encrypt_type: 1 };
     return kind === 'image' ? { type: 2, image_item: { media, mid_size: encrypted.length } }
       : kind === 'video' ? { type: 5, video_item: { media, video_size: encrypted.length } }

@@ -7,28 +7,31 @@ import { connectBridge } from '../../shared/connect.mjs';
 import { FeishuApi } from './feishu.mjs';
 import { Bridge } from './bridge.mjs';
 import { connectFeishu } from './connection.mjs';
+import { createNetwork } from '../../shared/network.mjs';
 
-export async function main(command = 'start', { root: directory, interactive = !!process.stdin.isTTY } = {}) {
+export async function main(command = 'start', { root: directory, interactive = !!process.stdin.isTTY, network: networkSettings } = {}) {
   if (command === 'help' || command === '--help') {
     console.log('首次/日常启动：cardbush-bridge start feishu\n修改凭据：cardbush-bridge setup feishu\n更换 Cardbush 会话：cardbush-bridge connect feishu\n检查配置：cardbush-bridge doctor feishu'); return;
   }
   if (!['start', 'setup', 'connect', 'doctor'].includes(command)) throw Error('unknown_command');
   const root = await privateDirectory(resolve(directory)), file = join(root, 'config.json');
   const release = await acquireLock(root), abort = new AbortController(); let bridge, connection;
+  const network = createNetwork(networkSettings);
   const cancel = () => { abort.abort(); bridge?.abort.abort(); connection?.close(); };
   process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
   try {
     let config = await readJson(file, { port: 4793, callbackToken: randomBytes(32).toString('hex'), cardbush: { url: '', token: '' } });
     if (command === 'doctor' && !config.feishu) throw Error('credentials_required');
     if (command === 'start' || command === 'connect') {
-      config = await connectBridge(config, { root, name: '飞书服务', signal: abort.signal, force: command === 'connect' });
+      config = await connectBridge(config, { root, name: '飞书服务', signal: abort.signal, force: command === 'connect', fetcher: network.fetch });
       if (command === 'connect') { console.log('绑定已保存，运行 cardbush-bridge start feishu。'); return; }
     }
     const terminal = terminalAsk({ signal: abort.signal, interactive });
     try { config.feishu = await configure(command === 'setup' ? undefined : config.feishu, { ask: terminal.ask }); }
     finally { terminal.close(); }
     console.log('正在验证飞书应用凭据与机器人能力……');
-    const api = new FeishuApi(config.feishu), identity = await api.identity(abort.signal);
+    console.log('Network mode: ' + network.mode);
+    const api = new FeishuApi(config.feishu, network.fetch), identity = await api.identity(abort.signal);
     const queue = await readJson(join(root, 'queue.json'), null);
     if (queue && queue.appId !== config.feishu.appId) throw Error('queue_app_mismatch');
     await writeJson(file, config);
@@ -38,17 +41,17 @@ export async function main(command = 'start', { root: directory, interactive = !
       console.log(config.cardbush?.url ? '已有 Cardbush 连接配置。' : '尚未连接 Cardbush，运行 cardbush-bridge start feishu。');
       console.log(queue?.owner || config.allowedSenders?.length ? '已有获准的飞书用户。' : '首次启动后需在飞书发送终端显示的配对码。'); return;
     }
-    bridge = await new Bridge(root, config, api, { botOpenId: identity.openId }).load();
+    bridge = await new Bridge(root, config, api, { botOpenId: identity.openId, fetcher: network.fetch }).load();
     await bridge.listen();
     const code = bridge.pairingCode();
     if (code) console.log('首次使用：在飞书私聊这个机器人发送“连接 ' + code + '”（10 分钟有效；过期后重启生成新码）。');
-    connection = connectFeishu(credentials(config.feishu), bridge, { signal: bridge.abort.signal });
+    connection = connectFeishu(credentials(config.feishu), bridge, { signal: bridge.abort.signal, network });
     console.log('飞书服务已启动。保持本窗口运行；Ctrl+C 停止。');
     await connection.started;
     bridge.abort.signal.throwIfAborted();
     await bridge.run();
   } catch (error) { error.userMessage = errors[error.code] || errors[error.message]; throw error; } finally {
-    cancel(); await bridge?.close(); await release(); process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
+    cancel(); await bridge?.close(); await network.close(); await release(); process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
   }
 }
 const errors = {

@@ -8,11 +8,13 @@ import { WeixinApi, API_BASE, apiBase } from './weixin.mjs';
 import { Bridge } from './bridge.mjs';
 import { configure, configurationError } from './config.mjs';
 import { connectBridge } from '../../shared/connect.mjs';
+import { createNetwork } from '../../shared/network.mjs';
 
-export async function main(command = 'start', { root: directory, args = [], interactive = !!process.stdin.isTTY } = {}) {
+export async function main(command = 'start', { root: directory, args = [], interactive = !!process.stdin.isTTY, network: networkSettings } = {}) {
 const root = await privateDirectory(resolve(directory));
 const file = name => join(root, name + '.json');
 const release = await acquireLock(root), cancel = new AbortController(); let bridge;
+const network = createNetwork(networkSettings);
 const stop = () => { cancel.abort(); bridge?.abort.abort(); };
 process.once('SIGINT', stop); process.once('SIGTERM', stop);
 async function init() {
@@ -22,7 +24,7 @@ async function init() {
   return config;
 }
 async function loginStart(signal) {
-  const qr = await new WeixinApi().qr(signal);
+  const qr = await new WeixinApi({}, network.fetch).qr(signal);
   if (!qr.qrcode || !qr.qrcode_img_content) throw Error('qrcode_missing');
   await writeJson(file('login'), { qrcode: qr.qrcode, base: API_BASE, createdAt: Date.now() });
   await QRCode.toFile(join(root, 'login.png'), qr.qrcode_img_content, { width: 420, margin: 3 });
@@ -32,7 +34,7 @@ async function loginStart(signal) {
 async function loginCheck(verifyCode, signal) {
   const login = await readJson(file('login'));
   if (Date.now() - login.createdAt > 300000) throw Error('qr_expired');
-  const result = await new WeixinApi().qrStatus(login.qrcode, login.base, verifyCode, signal);
+  const result = await new WeixinApi({}, network.fetch).qrStatus(login.qrcode, login.base, verifyCode, signal);
   if (result.status === 'scaned_but_redirect' && result.redirect_host) { login.base = apiBase(result.redirect_host); await writeJson(file('login'), login); }
   if (result.status === 'confirmed') {
     if (![result.bot_token, result.ilink_bot_id, result.ilink_user_id].every(s => typeof s === 'string' && s)) throw Error('incomplete_login');
@@ -54,7 +56,7 @@ async function login(signal) {
   } while (status !== 'confirmed');
 }
 async function connect(config, signal, force = false) {
-  return connectBridge(config, { root, name: '微信服务', signal, force });
+  return connectBridge(config, { root, name: '微信服务', signal, force, fetcher: network.fetch });
 }
 try {
   if (command === 'init') { await init(); console.log('配置文件：' + file('config')); console.log('Cardbush 回复地址和请求头：' + file('cardbush-connection')); }
@@ -74,7 +76,8 @@ try {
       const config = await connect(await init(), cancel.signal);
       if (!await readJson(file('account'), null)) await login(cancel.signal);
       const account = await readJson(file('account'));
-      bridge = await new Bridge(root, config, account, new WeixinApi(account)).load();
+      console.log('Network mode: ' + network.mode);
+      bridge = await new Bridge(root, config, account, new WeixinApi(account, network.fetch), { fetcher: network.fetch }).load();
       await bridge.run();
   } else console.log('Commands: start | connect | init | setup | login | login-start | login-check [verification-code]');
 } catch (error) { if (error.name !== 'AbortError') {
@@ -83,5 +86,5 @@ try {
     connection_rejected: '连接请求已被忽略。需要重新申请时运行 cardbush-bridge connect weixin。',
     pairing_expired: '等待连接已超时。请打开 Cardbush 后重新运行 cardbush-bridge start weixin。' }[error.message];
   error.userMessage = connectionError || configurationError(error); throw error;
-} } finally { stop(); await bridge?.close(); await release(); process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); }
+} } finally { stop(); await bridge?.close(); await network.close(); await release(); process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); }
 }

@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bridge } from '../../src/adapters/weixin/bridge.mjs';
 import { digest } from '../../src/shared/bot-outbound.mjs';
-import { deliverySnapshot } from '../../src/shared/outbound-worker.mjs';
+import { deliverySnapshot, deliveryReceipt } from '../../src/shared/outbound-worker.mjs';
+import { WeixinApi } from '../../src/adapters/weixin/weixin.mjs';
 const gate = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const until = async fn => { for (let n = 0; n < 100; n++) { if (fn()) return; await new Promise(r => setTimeout(r, 5)); } assert.fail('condition timed out'); };
 async function fixture(t, api, options = {}) {
@@ -68,4 +69,31 @@ test('shutdown during upload does not dispatch a subsequent platform send', asyn
   await f.enqueue(); const pending = f.bridge.sendOutbound(); await until(() => f.state().phase === 'uploading');
   f.bridge.abort.abort(); uploading.resolve(); await pending;
   assert.equal(sends, 0); assert.equal(f.state().done, false); assert.ok(f.state().files[0].uploaded);
+});
+
+test('platform rejection retains sending phase and redacted diagnostic facts; successful retry needs no model query', async t => {
+  let now = 100, fail = true, uploads = 0, notifications = 0;
+  const account = { token: 'account-secret' };
+  const api = new WeixinApi(account, async () => fail ? Response.json({ ret: -2, errcode: -2,
+    errmsg: 'send rejected account-secret private-context https://host/upload?key=hidden\n' + 'x'.repeat(800) }) : Response.json({ ret: 0 }));
+  api.prepareMedia = async () => { uploads++; return { type: 2 }; };
+  const f = await fixture(t, api, { now: () => now, fetcher: async (_url, options) => {
+    notifications++; const event = JSON.parse(options.body);
+    assert.equal(event.result.lastError.details.operation, 'sendmessage');
+    return Response.json({ eventId: event.eventId, status: 'accepted' });
+  } });
+  await f.enqueue(); f.bridge.deliveryEvents = true;
+  assert.equal(deliveryReceipt(f.bridge, f.state()).completion.mode, 'event');
+  await f.bridge.sendOutbound();
+  const error = deliverySnapshot(f.state()).lastError;
+  assert.equal(error.phase, 'sending_text'); assert.equal(error.code, 'weixin_error_-2');
+  assert.equal(error.details.httpStatus, 200); assert.equal(error.details.ret, -2);
+  assert.ok(error.details.message.length <= 512);
+  assert.doesNotMatch(JSON.stringify(error), /account-secret|private-context|host\/upload|key=hidden/);
+  assert.equal(uploads, 0, 'a caption rejection is not an upload failure');
+  now = f.state().nextAttemptAt; fail = false;
+  await f.bridge.sendOutbound(); await f.bridge.outbound.notify();
+  assert.equal(f.state().status, 'delivered'); assert.equal(uploads, 1); assert.equal(notifications, 1);
+  assert.equal(deliveryReceipt({ deliveryEvents: false }, f.state()).completion.mode, 'query');
+  assert.equal(deliveryReceipt({ deliveryEvents: true }, f.state()).completion.mode, 'query', 'an adapter without a completion worker cannot promise events');
 });

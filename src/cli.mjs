@@ -5,6 +5,9 @@ import { terminalAsk } from './shared/terminal.mjs';
 import { CLI_NAME, parseInvocation, helpText, usageError } from './arguments.mjs';
 
 const errors = {
+  windows_network_unavailable: 'Windows direct/system networking is unavailable. Direct mode requires an active physical IPv4 uplink and DNS. Check the network or choose --proxy system / --proxy <url>.',
+  windows_network_timeout: 'Windows network initialization timed out. Check the network or choose --proxy system / --proxy <url>.',
+  system_proxy_pac_unsupported: 'macOS PAC is not supported by this bridge. Use --proxy <url> to select an explicit proxy.',
   legacy_bridge_running: '旧桥仍在运行，请先在原终端按 Ctrl+C；登录及待发队列会在下次启动时自动导入。',
   service_already_running: '这个平台已在运行，请先停止原进程。',
   credentials_required_noninteractive: `首次配置需要交互终端，请单独运行 ${CLI_NAME} start <platform>。`,
@@ -27,7 +30,7 @@ async function choosePlatform(command, interactive) {
   if (!selected || selected === '0') return;
   return choices[Number(selected) - 1]?.id || selected;
 }
-async function startAll() {
+async function startAll(network) {
   const configured = [];
   for (const bridge of bridges) {
     const root = await prepareData(bridge), state = await configurationState(bridge, root);
@@ -36,7 +39,7 @@ async function startAll() {
   }
   if (!configured.length) throw Error('no_configured_bridges');
   await Promise.all(configured.map(async ({ bridge, root }) => {
-    try { const adapter = await bridge.load(); await adapter.main('start', { root, interactive: false, args: [] }); }
+    try { const adapter = await bridge.load(); await adapter.main('start', { root, interactive: false, args: [], network }); }
     catch (error) { if (error.name !== 'AbortError') { console.error(`${bridge.name}服务停止。`); reportError(error); } }
   }));
 }
@@ -58,14 +61,14 @@ export async function main(args = process.argv.slice(2)) {
     if (json) console.log(JSON.stringify({ bridges: states }));
     return;
   }
-  if (invocation.all) return startAll();
+  if (invocation.all) return startAll(invocation.network);
   const interactive = invocation.interactive && !!process.stdin.isTTY;
   const platform = invocation.platform || await choosePlatform(command, interactive);
   if (!platform) return;
-  if (platform === 'all' && command === 'start') return startAll();
+  if (platform === 'all' && command === 'start') return startAll(invocation.network);
   const bridge = bridges.find(item => item.id === platform);
   if (!bridge) throw usageError('unknown_platform', '请选择列表中的平台。');
   if (!bridge.commands.includes(command)) throw usageError('unsupported_command', '该平台不支持此命令。');
   const root = await prepareData(bridge), adapter = await bridge.load();
-  await adapter.main(command, { root, args: invocation.args, interactive });
+  await adapter.main(command, { root, args: invocation.args, interactive, network: invocation.network });
 }

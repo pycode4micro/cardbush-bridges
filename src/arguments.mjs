@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { bridges } from './registry.mjs';
+import { networkOptions } from './shared/network.mjs';
 
 export const CLI_NAME = 'cardbush-bridge';
 const descriptions = {
@@ -17,11 +18,12 @@ export function usageError(code, message) {
   return Object.assign(new Error(code), { exitCode: 2, userMessage: message });
 }
 export function helpText(command) {
+  const networkHelp = '  --proxy <mode|url>  direct (default), system, or HTTP(S)/SOCKS5 proxy URL\n  --no-proxy          Use direct networking\n';
   if (command) {
     const usage = command === 'status' ? '[platform] [--json]' : command === 'start' ? '[platform] [--all] [--no-interactive]'
       : command === 'login-check' ? '<platform> [verification-code]' : '<platform> [--no-interactive]';
     const platforms = bridges.filter(b => command === 'status' || b.commands.includes(command)).map(b => b.id).join(', ');
-    return `Usage: ${CLI_NAME} ${command} ${usage}\n\n${descriptions[command] || command}\n\nPlatforms: ${platforms}\n\nOptions:\n  -h, --help          显示帮助\n${command === 'start' ? '  --all               同时启动所有已配置平台\n' : ''}${command === 'status' ? '  --json              输出 JSON\n' : '  --no-interactive    不询问终端输入，使用已保存或环境变量配置\n'}`;
+    return `Usage: ${CLI_NAME} ${command} ${usage}\n\n${descriptions[command] || command}\n\nPlatforms: ${platforms}\n\nOptions:\n  -h, --help          显示帮助\n${command === 'start' ? '  --all               同时启动所有已配置平台\n' : ''}${command === 'status' ? '  --json              输出 JSON\n' : '  --no-interactive    不询问终端输入，使用已保存或环境变量配置\n' + networkHelp}`;
   }
   return `Usage: ${CLI_NAME} <command> [platform] [options]
 
@@ -43,6 +45,7 @@ Options:
   --all               start：启动所有已配置平台
   --json              status：输出 JSON
   --no-interactive    不询问终端输入
+${networkHelp}
 
 Examples:
   ${CLI_NAME} start feishu
@@ -60,6 +63,7 @@ export function parseInvocation(args) {
   try { parsed = parseArgs({ args, allowPositionals: true, strict: true, options: {
     help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
     all: { type: 'boolean' }, json: { type: 'boolean' }, 'no-interactive': { type: 'boolean' },
+    proxy: { type: 'string' }, 'no-proxy': { type: 'boolean' },
   } }); } catch { throw usageError('invalid_option', `未知选项或选项格式错误。用 ${CLI_NAME} --help 查看支持的参数。`); }
   const { values } = parsed;
   let [command, platform, ...rest] = parsed.positionals;
@@ -86,5 +90,9 @@ export function parseInvocation(args) {
   }
   if (rest.length > (command === 'login-check' ? 1 : 0)) throw usageError('unexpected_argument', '位置参数过多。');
   if (requestedHelp) return { action: 'help', command };
-  return { action: 'run', command, platform, args: rest, all: !!values.all, json: !!values.json, interactive: !values['no-interactive'] };
+  if (values.proxy && values['no-proxy']) throw usageError('conflicting_proxy', 'Use either --proxy or --no-proxy.');
+  if (command === 'status' && (values.proxy || values['no-proxy'])) throw usageError('invalid_proxy_usage', 'Network options are not used by status.');
+  let network;
+  try { network = networkOptions(values.proxy ?? 'direct'); } catch { throw usageError('invalid_proxy_url', 'Use --proxy direct, --proxy system, or a valid HTTP(S)/SOCKS5 proxy URL.'); }
+  return { action: 'run', command, platform, args: rest, all: !!values.all, json: !!values.json, interactive: !values['no-interactive'], network };
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { validateBotFiles } from './bot-outbound.mjs';
-import { deliverySnapshot } from './outbound-worker.mjs';
+import { deliverySnapshot, deliveryReceipt } from './outbound-worker.mjs';
 
 export const bridgeInstance = () => randomUUID();
 export async function advertisePlugins(bridge, capabilities) {
@@ -43,14 +43,14 @@ export function messagingHandlers(bridge, ownsMessage) {
       fields(event.arguments, ['text']);
       if (files.length || typeof event.arguments.text !== 'string' || !event.arguments.text.trim() || event.arguments.text.length > 32000) throw Error('invalid_tool_arguments');
       await bridge.receiveSend({ ...event, type: 'message.send', text: event.arguments.text }, files);
-      return deliverySnapshot(bridge.state.outbound.find(item => item.eventId === event.eventId));
+      return deliveryReceipt(bridge, bridge.state.outbound.find(item => item.eventId === event.eventId));
     },
     async send_file(event, files) {
       fields(event.arguments, ['file', 'caption']);
       if (files.length !== 1 || !event.arguments.file || Object.keys(event.arguments.file).join() !== 'part'
         || event.arguments.file.part !== event.files[0].part || event.arguments.caption !== undefined && typeof event.arguments.caption !== 'string') throw Error('invalid_tool_arguments');
       await bridge.receiveSend({ ...event, type: 'message.send', text: event.arguments.caption ?? '' }, files);
-      return deliverySnapshot(bridge.state.outbound.find(item => item.eventId === event.eventId));
+      return deliveryReceipt(bridge, bridge.state.outbound.find(item => item.eventId === event.eventId));
     },
     async delivery_status(event, files) {
       fields(event.arguments, ['delivery_id']);

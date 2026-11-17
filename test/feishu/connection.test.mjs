@@ -11,8 +11,10 @@ test('official dispatcher acknowledges only persisted v2 messages, with reconnec
     async start(value) { dispatcher = value.eventDispatcher; options.onReady(); }
     close() { closed++; }
   }
-  const connection = connectFeishu(app, bridge, { sdk: { ...lark, WSClient }, signal: bridge.abort.signal, log: text => logs.push(text) });
+  const network = { agent: {}, httpInstance: { request() {} } };
+  const connection = connectFeishu(app, bridge, { sdk: { ...lark, WSClient }, signal: bridge.abort.signal, log: text => logs.push(text), network });
   await connection.started;
+  assert.equal(options.agent, network.agent); assert.equal(options.httpInstance, network.httpInstance);
   const envelope = { schema: '2.0', header: { event_type: 'im.message.receive_v1', event_id: 'ev_real_shape' }, event: message() };
   assert.deepEqual(await dispatcher.invoke(envelope, { needCheck: false }), {});
   assert.equal(bridge.state.records.length, 1); assert.equal(bridge.state.records[0].text, '你好');
